@@ -1,4 +1,5 @@
-import { memo } from "react";
+import { memo, useState } from "react";
+import { OnboardingModal } from "./OnboardingModal";
 
 const FEATURES = [
   {
@@ -61,7 +62,11 @@ const TIERS = [
 ];
 
 export const LandingPage = memo(function LandingPage({ onEnter }: { onEnter: () => void }) {
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
   return (
+    <>
+    {showOnboarding && <OnboardingModal onClose={() => setShowOnboarding(false)} onEnter={onEnter} />}
     <div className="min-h-screen" style={{ background: "#0a0a0f", color: "rgba(255,255,255,0.85)" }}>
       {/* Hero */}
       <div className="flex flex-col items-center justify-center px-6 pt-20 pb-16 text-center">
@@ -144,7 +149,7 @@ export const LandingPage = memo(function LandingPage({ onEnter }: { onEnter: () 
                 ))}
               </ul>
               <button
-                onClick={onEnter}
+                onClick={() => setShowOnboarding(true)}
                 className="w-full py-2 rounded-lg font-mono text-xs transition-all hover:scale-105"
                 style={{
                   background: t.highlight ? "rgba(232,184,109,0.15)" : "rgba(255,255,255,0.05)",
@@ -166,5 +171,6 @@ export const LandingPage = memo(function LandingPage({ onEnter }: { onEnter: () 
         </p>
       </div>
     </div>
+    </>
   );
 });
