@@ -79,6 +79,7 @@ const NAV_ITEMS = [
   { href: "#soul-sync", label: "Sync", id: "soul-sync" },
   { href: "#progress", label: "Progress", id: "progress" },
   { href: "#monitoring", label: "Monitor", id: "monitoring" },
+  { href: "#consciousness", label: "🧠 Think", id: "consciousness" },
   { href: "#config", label: "Config", id: "config" },
 ];
 

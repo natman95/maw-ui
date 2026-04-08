@@ -21,6 +21,7 @@ import { DashboardView } from "./components/DashboardView";
 import { SoulSyncDashboard } from "./components/SoulSyncDashboard";
 import { ProgressViewer } from "./components/ProgressViewer";
 import { MonitoringView } from "./components/MonitoringView";
+import { ConsciousnessView } from "./components/ConsciousnessView";
 import { LoadingSkeleton } from "./components/LoadingSkeleton";
 import { ShortcutOverlay } from "./components/ShortcutOverlay";
 import { JumpOverlay } from "./components/JumpOverlay";
@@ -523,6 +524,14 @@ export function App() {
     return (
       <Layout activeView="monitoring" {...layoutProps}>
         <MonitoringView />
+      </Layout>
+    );
+  }
+
+  if (route === "consciousness") {
+    return (
+      <Layout activeView="consciousness" {...layoutProps}>
+        <ConsciousnessView />
       </Layout>
     );
   }

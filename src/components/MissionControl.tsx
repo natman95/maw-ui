@@ -213,7 +213,7 @@ export const MissionControl = memo(function MissionControl({
         </div>
       )}
 
-      {/* Bottom left buttons — search */}
+      {/* Bottom left buttons — search + consciousness */}
       <div className="absolute bottom-4 left-6 flex items-center gap-2 z-20">
         <button
           onClick={() => mc.setShowSearch(true)}
@@ -227,6 +227,14 @@ export const MissionControl = memo(function MissionControl({
           <span className="text-[10px] font-mono">Oracle</span>
           <kbd className="text-[8px] text-white/20 ml-1">⌘K</kbd>
         </button>
+        <a
+          href="#consciousness"
+          className="flex items-center gap-2 px-3 py-2 rounded-xl bg-black/50 backdrop-blur border border-purple-500/20 text-purple-400/70 hover:text-purple-300 hover:border-purple-400/40 cursor-pointer transition-all no-underline"
+          title="Oracle Consciousness"
+        >
+          <span style={{ fontSize: 14 }}>🧠</span>
+          <span className="text-[10px] font-mono">Consciousness</span>
+        </a>
       </div>
 
       {/* Oracle Search overlay */}
