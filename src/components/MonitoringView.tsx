@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../lib/apiFetch";
-import { agentColor } from "../lib/constants";
-import { AgentAvatar } from "./AgentAvatar";
+import { agentColor, agentIcon } from "../lib/constants";
 
 interface OracleHealth {
   name: string;
@@ -30,6 +29,24 @@ interface SnapshotSummary {
   windowCount: number;
 }
 
+interface HealthSnapshot {
+  ts: number;
+  timestamp: string;
+  memAvailMb: number;
+  memTotalMb: number;
+  memUsedPct: number;
+  diskUsedPct: number;
+  diskAvailGb: number;
+  loadAvg: string;
+  cpuCount: number;
+  pm2Online: number;
+  pm2Total: number;
+  dockerRunning: number;
+  dockerTotal: number;
+  alertFired: number;
+  alertReason: string | null;
+}
+
 function timeAgo(ts: string | number): string {
   const d = typeof ts === "string" ? new Date(ts) : new Date(ts);
   const diff = Date.now() - d.getTime();
@@ -51,7 +68,9 @@ function HealthCard({ oracle }: { oracle: OracleHealth }) {
       border: `1px solid ${isHealthy ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)"}`,
     }}>
       <div className="flex items-center gap-3 mb-4">
-        <AgentAvatar name={oracle.name + "-oracle"} size={40} />
+        <div className="w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold shrink-0" style={{ background: `${color}22`, border: `2px solid ${color}` }}>
+          {agentIcon(oracle.name + "-oracle")}
+        </div>
         <div className="flex-1">
           <h3 className="font-mono font-bold" style={{ color }}>{oracle.name}</h3>
           <div className="flex items-center gap-2 mt-0.5">
@@ -129,12 +148,189 @@ function SnapshotList({ snapshots }: { snapshots: SnapshotSummary[] }) {
   );
 }
 
+function MiniBar({ value, max, color, warn }: { value: number; max: number; color: string; warn?: number }) {
+  const pct = Math.min(100, (value / max) * 100);
+  const isWarn = warn !== undefined && value >= warn;
+  const barColor = isWarn ? "#ef4444" : color;
+  return (
+    <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+      <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: barColor }} />
+    </div>
+  );
+}
+
+function ServerHealth({ snapshots }: { snapshots: HealthSnapshot[] }) {
+  if (snapshots.length === 0) {
+    return <p className="font-mono text-xs text-center py-8" style={{ color: "rgba(255,255,255,0.25)" }}>No health data yet — waiting for first heartbeat</p>;
+  }
+
+  const latest = snapshots[0];
+  const load1 = parseFloat(latest.loadAvg.split(" ")[0] || "0");
+
+  // Build mini timeline (last 24h, reversed to chronological)
+  const timeline = [...snapshots].reverse();
+
+  return (
+    <div className="space-y-6">
+      {/* Current Status Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="rounded-2xl p-4" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <div className="font-mono text-[10px] mb-2" style={{ color: "rgba(255,255,255,0.3)" }}>MEMORY</div>
+          <div className="font-mono text-xl font-bold mb-1" style={{ color: latest.memUsedPct > 85 ? "#ef4444" : "#22c55e" }}>
+            {latest.memUsedPct}%
+          </div>
+          <MiniBar value={latest.memUsedPct} max={100} color="#8b5cf6" warn={85} />
+          <div className="font-mono text-[10px] mt-1" style={{ color: "rgba(255,255,255,0.25)" }}>
+            {latest.memAvailMb} MB free / {latest.memTotalMb} MB
+          </div>
+        </div>
+
+        <div className="rounded-2xl p-4" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <div className="font-mono text-[10px] mb-2" style={{ color: "rgba(255,255,255,0.3)" }}>DISK</div>
+          <div className="font-mono text-xl font-bold mb-1" style={{ color: latest.diskUsedPct > 90 ? "#ef4444" : "#22c55e" }}>
+            {latest.diskUsedPct}%
+          </div>
+          <MiniBar value={latest.diskUsedPct} max={100} color="#3b82f6" warn={90} />
+          <div className="font-mono text-[10px] mt-1" style={{ color: "rgba(255,255,255,0.25)" }}>
+            {latest.diskAvailGb} GB free
+          </div>
+        </div>
+
+        <div className="rounded-2xl p-4" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <div className="font-mono text-[10px] mb-2" style={{ color: "rgba(255,255,255,0.3)" }}>LOAD</div>
+          <div className="font-mono text-xl font-bold mb-1" style={{ color: load1 > latest.cpuCount ? "#ef4444" : "#22c55e" }}>
+            {latest.loadAvg.split(" ")[0]}
+          </div>
+          <MiniBar value={load1} max={latest.cpuCount * 2} color="#f59e0b" warn={latest.cpuCount} />
+          <div className="font-mono text-[10px] mt-1" style={{ color: "rgba(255,255,255,0.25)" }}>
+            {latest.loadAvg} / {latest.cpuCount} CPUs
+          </div>
+        </div>
+
+        <div className="rounded-2xl p-4" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <div className="font-mono text-[10px] mb-2" style={{ color: "rgba(255,255,255,0.3)" }}>SERVICES</div>
+          <div className="font-mono text-xl font-bold mb-1" style={{ color: "#22c55e" }}>
+            {latest.pm2Online + latest.dockerRunning}
+          </div>
+          <div className="flex gap-3 mt-1">
+            <div className="font-mono text-[10px]" style={{ color: "rgba(255,255,255,0.25)" }}>
+              PM2: {latest.pm2Online}/{latest.pm2Total}
+            </div>
+            <div className="font-mono text-[10px]" style={{ color: "rgba(255,255,255,0.25)" }}>
+              Docker: {latest.dockerRunning}/{latest.dockerTotal}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Timeline */}
+      <div className="rounded-2xl p-5" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+        <div className="font-mono text-[10px] mb-3" style={{ color: "rgba(255,255,255,0.3)" }}>
+          TIMELINE — last {snapshots.length} snapshots
+        </div>
+
+        {/* Memory timeline */}
+        <div className="mb-4">
+          <div className="font-mono text-[10px] mb-1" style={{ color: "#8b5cf6" }}>MEM %</div>
+          <div className="flex items-end gap-px h-12">
+            {timeline.map((s, i) => (
+              <div
+                key={i}
+                className="flex-1 rounded-t-sm transition-all min-w-[2px]"
+                style={{
+                  height: `${s.memUsedPct}%`,
+                  background: s.memUsedPct > 85 ? "#ef4444" : "#8b5cf6",
+                  opacity: 0.6,
+                }}
+                title={`${new Date(s.ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} — ${s.memUsedPct}%`}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Disk timeline */}
+        <div className="mb-4">
+          <div className="font-mono text-[10px] mb-1" style={{ color: "#3b82f6" }}>DISK %</div>
+          <div className="flex items-end gap-px h-12">
+            {timeline.map((s, i) => (
+              <div
+                key={i}
+                className="flex-1 rounded-t-sm transition-all min-w-[2px]"
+                style={{
+                  height: `${s.diskUsedPct}%`,
+                  background: s.diskUsedPct > 90 ? "#ef4444" : "#3b82f6",
+                  opacity: 0.6,
+                }}
+                title={`${new Date(s.ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} — ${s.diskUsedPct}%`}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Load timeline */}
+        <div>
+          <div className="font-mono text-[10px] mb-1" style={{ color: "#f59e0b" }}>LOAD</div>
+          <div className="flex items-end gap-px h-12">
+            {timeline.map((s, i) => {
+              const l = parseFloat(s.loadAvg.split(" ")[0] || "0");
+              const maxLoad = s.cpuCount * 2;
+              return (
+                <div
+                  key={i}
+                  className="flex-1 rounded-t-sm transition-all min-w-[2px]"
+                  style={{
+                    height: `${Math.min(100, (l / maxLoad) * 100)}%`,
+                    background: l > s.cpuCount ? "#ef4444" : "#f59e0b",
+                    opacity: 0.6,
+                  }}
+                  title={`${new Date(s.ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} — ${l}`}
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex justify-between mt-2">
+          <span className="font-mono text-[9px]" style={{ color: "rgba(255,255,255,0.15)" }}>
+            {timeline.length > 0 ? new Date(timeline[0].ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : ""}
+          </span>
+          <span className="font-mono text-[9px]" style={{ color: "rgba(255,255,255,0.15)" }}>
+            {timeline.length > 0 ? new Date(timeline[timeline.length - 1].ts).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : ""}
+          </span>
+        </div>
+      </div>
+
+      {/* Alert History */}
+      {snapshots.some(s => s.alertFired) && (
+        <div className="rounded-2xl p-5" style={{ background: "rgba(239,68,68,0.04)", border: "1px solid rgba(239,68,68,0.15)" }}>
+          <div className="font-mono text-[10px] mb-3" style={{ color: "#ef4444" }}>ALERTS</div>
+          <div className="space-y-1">
+            {snapshots.filter(s => s.alertFired).slice(0, 10).map((s, i) => (
+              <div key={i} className="flex items-center gap-3 py-1">
+                <span className="font-mono text-[10px]" style={{ color: "rgba(255,255,255,0.25)" }}>
+                  {new Date(s.ts).toLocaleString("en-GB", { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                </span>
+                <span className="font-mono text-xs" style={{ color: "#fca5a5" }}>{s.alertReason}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="font-mono text-[10px] text-right" style={{ color: "rgba(255,255,255,0.15)" }}>
+        Last updated: {new Date(latest.ts).toLocaleString("en-GB")}
+      </div>
+    </div>
+  );
+}
+
 export function MonitoringView() {
   const [oracles, setOracles] = useState<OracleHealth[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [snapshots, setSnapshots] = useState<SnapshotSummary[]>([]);
+  const [healthHistory, setHealthHistory] = useState<HealthSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"health" | "audit" | "snapshots">("health");
+  const [tab, setTab] = useState<"health" | "server" | "audit" | "snapshots">("health");
 
   const fetchTab = useCallback(async (activeTab?: string) => {
     const t = activeTab || tab;
@@ -149,6 +345,10 @@ export function MonitoringView() {
     if (t === "snapshots" || loading) {
       const res = await apiFetch<{ snapshots: SnapshotSummary[] }>("/api/snapshots?limit=20").catch(() => ({ snapshots: [] }));
       setSnapshots(res.snapshots || []);
+    }
+    if (t === "server" || loading) {
+      const res = await apiFetch<{ snapshots: HealthSnapshot[] }>("/api/health/history?hours=24").catch(() => ({ snapshots: [] }));
+      setHealthHistory(res.snapshots || []);
     }
     setLoading(false);
   }, [tab, loading]);
@@ -175,6 +375,7 @@ export function MonitoringView() {
 
   const tabs = [
     { id: "health" as const, label: "Health", count: oracles.length },
+    { id: "server" as const, label: "Server", count: healthHistory.length },
     { id: "audit" as const, label: "Audit Log", count: audit.length },
     { id: "snapshots" as const, label: "Snapshots", count: snapshots.length },
   ];
@@ -221,6 +422,10 @@ export function MonitoringView() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {oracles.map(o => <HealthCard key={o.name} oracle={o} />)}
         </div>
+      )}
+
+      {tab === "server" && (
+        <ServerHealth snapshots={healthHistory} />
       )}
 
       {tab === "audit" && (
