@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "../lib/apiFetch";
 import { agentColor, agentIcon } from "../lib/constants";
+import { useWebSocket } from "../hooks/useWebSocket";
 
 interface OracleHealth {
   name: string;
@@ -356,11 +357,15 @@ export function MonitoringView() {
   // Initial load: fetch all tabs
   useEffect(() => { fetchTab(); }, []);
 
-  // Auto-refresh active tab every 30s
-  useEffect(() => {
-    const interval = setInterval(() => fetchTab(tab), 30_000);
-    return () => clearInterval(interval);
-  }, [tab, fetchTab]);
+  // Real-time: refetch on feed events via WebSocket (replaces 30s polling)
+  const fetchTabRef = useRef(fetchTab);
+  fetchTabRef.current = fetchTab;
+  const handleWsMessage = useCallback((msg: any) => {
+    if (msg.type === "feed" || msg.type === "maw-log") {
+      fetchTabRef.current();
+    }
+  }, []);
+  useWebSocket(handleWsMessage);
 
   if (loading) {
     return (

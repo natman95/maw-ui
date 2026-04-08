@@ -3,6 +3,7 @@ import { apiUrl } from "../lib/api";
 import { agentColor, roomStyle, guessCommand } from "../lib/constants";
 import { AgentAvatar } from "./AgentAvatar";
 import { describeActivity, type FeedEvent } from "../lib/feed";
+import { useWebSocket } from "../hooks/useWebSocket";
 import { useFleetStore } from "../lib/store";
 import type { AgentState, Session, AgentEvent } from "../lib/types";
 
@@ -199,21 +200,26 @@ function TokenTracking() {
   const [rate, setRate] = useState<TokenRate | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchTokens = () => {
-      Promise.all([
-        fetch(apiUrl("/api/tokens")).then(r => r.ok ? r.json() : []),
-        fetch(apiUrl("/api/tokens/rate?mode=window&window=3600")).then(r => r.ok ? r.json() : null),
-      ]).then(([tokData, rateData]) => {
-        setSessions(Array.isArray(tokData) ? tokData : tokData?.sessions || []);
-        setRate(rateData);
-        setLoading(false);
-      }).catch(() => setLoading(false));
-    };
-    fetchTokens();
-    const iv = setInterval(fetchTokens, 30_000);
-    return () => clearInterval(iv);
+  const fetchTokens = useCallback(() => {
+    Promise.all([
+      fetch(apiUrl("/api/tokens")).then(r => r.ok ? r.json() : []),
+      fetch(apiUrl("/api/tokens/rate?mode=window&window=3600")).then(r => r.ok ? r.json() : null),
+    ]).then(([tokData, rateData]) => {
+      setSessions(Array.isArray(tokData) ? tokData : tokData?.sessions || []);
+      setRate(rateData);
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, []);
+
+  useEffect(() => { fetchTokens(); }, [fetchTokens]);
+
+  // Real-time: refetch on feed events via WebSocket (replaces 30s polling)
+  const fetchRef = useRef(fetchTokens);
+  fetchRef.current = fetchTokens;
+  const handleWs = useCallback((msg: any) => {
+    if (msg.type === "feed") fetchRef.current();
+  }, []);
+  useWebSocket(handleWs, { types: ["feed"] });
 
   // Aggregate by project
   const byProject = useMemo(() => {
