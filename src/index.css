@@ -14,6 +14,21 @@ button, [role="button"], a[href], summary { cursor: pointer; }
 ::-webkit-scrollbar-track { background: #0a0a0f; }
 ::-webkit-scrollbar-thumb { background: #2a2a3e; border-radius: 3px; }
 
+/* Mobile optimizations */
+@media (max-width: 640px) {
+  /* Prevent text size adjust on orientation change */
+  html { -webkit-text-size-adjust: 100%; }
+  /* Smaller fonts for mobile */
+  .font-mono { font-size: 11px; }
+  /* Touch-friendly tap targets */
+  button, [role="button"] { min-height: 36px; }
+  /* Fix bottom bar overlap with mobile browser chrome */
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 8px); }
+  /* Narrower padding */
+  .px-4 { padding-left: 0.75rem; padding-right: 0.75rem; }
+  .px-6 { padding-left: 1rem; padding-right: 1rem; }
+}
+
 /* Shared */
 @keyframes agent-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
 @keyframes blink { 50% { opacity: 0; } }
@@ -34,6 +49,10 @@ button, [role="button"], a[href], summary { cursor: pointer; }
   75% { transform: scaleX(0.15); }
   100% { transform: scaleX(1); }
 }
+
+/* Hide scrollbar for nav */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 
 /* Hover preview card */
 @keyframes fadeSlideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }

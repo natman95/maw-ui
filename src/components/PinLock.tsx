@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { apiUrl } from "../lib/api";
+import { LandingPage } from "./LandingPage";
 
 const STORAGE_KEY = "office-unlocked";
 const TOKEN_KEY = "office-token";
@@ -11,6 +12,7 @@ export function getAuthToken(): string | null {
 
 export function PinLock({ children }: { children: React.ReactNode }) {
   const [unlocked, setUnlocked] = useState(() => sessionStorage.getItem(STORAGE_KEY) === "1");
+  const [showPin, setShowPin] = useState(() => sessionStorage.getItem(STORAGE_KEY) === "1");
   const [pinLength, setPinLength] = useState(4);
   const [enabled, setEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -83,6 +85,7 @@ export function PinLock({ children }: { children: React.ReactNode }) {
   }, [unlocked, handleDigit, handleDelete]);
 
   if (unlocked) return <>{children}</>;
+  if (!showPin) return <LandingPage onEnter={() => setShowPin(true)} />;
   if (loading) return <div className="fixed inset-0" style={{ background: "#0a0a0f" }} />;
 
   const BUTTONS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
