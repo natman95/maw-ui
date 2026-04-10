@@ -58,9 +58,9 @@ export function PluginPanel() {
             return (
               <div key={i} className={`flex items-center gap-1.5 px-3 py-0.5 text-[9px] font-mono ${m.live ? "" : "opacity-50"}`}
                 title={m.msg || undefined}>
-                <span className="text-cyan-400/60">{m.from}</span>
+                <span className={m.from === "user" ? "text-yellow-400/60" : "text-cyan-400/60"}>{m.from}</span>
                 <span className="text-white/20">{"\u2192"}</span>
-                <span className="text-cyan-400/60">{m.to}</span>
+                <span className={m.from === "user" ? "text-yellow-400/60" : "text-cyan-400/60"}>{m.to}</span>
                 <span className="text-white/15 ml-auto">{ageStr}</span>
               </div>
             );
