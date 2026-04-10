@@ -21,7 +21,7 @@ export function PluginPanel() {
   }
 
   return (
-    <div className="absolute bottom-4 left-4 w-[240px] max-h-[calc(100%-76px)] rounded-lg border overflow-hidden flex flex-col"
+    <div className="absolute bottom-4 left-4 top-[60px] w-[240px] rounded-lg border overflow-hidden flex flex-col"
       style={{
         background: "rgba(3,10,24,0.95)",
         borderColor: "rgba(255,255,255,0.08)",
@@ -36,7 +36,7 @@ export function PluginPanel() {
         <span className="text-[9px] font-mono text-cyan-400/60">Live</span>
       </div>
 
-      <div className="overflow-y-auto">
+      <div className="flex-1 overflow-y-auto">
         {liveMessages.length > 0 ? (
           [...liveMessages].reverse().map((m, i) => {
             const age = Math.floor((Date.now() - m.ts) / 1000);
