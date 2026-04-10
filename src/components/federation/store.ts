@@ -25,12 +25,14 @@ interface FederationStore {
   plugins: PluginInfo[];
   liveMessages: LiveMessage[];
   edgePulses: Record<string, number>; // edge key -> timestamp of last pulse
+  showLineage: boolean;
 
   setGraph: (agents: AgentNode[], edges: AgentEdge[], particles: Map<string, Particle[]>) => void;
   setVersion: (v: string) => void;
   setSelected: (id: string | null) => void;
   setHovered: (id: string | null) => void;
   setPlugins: (plugins: PluginInfo[]) => void;
+  toggleLineage: () => void;
   handleFeedEvent: (e: FeedEvent) => void;
   handleFeedHistory: (events: FeedEvent[]) => void;
   handleLiveMessage: (from: string, to: string) => void;
@@ -49,6 +51,7 @@ export const useFederationStore = create<FederationStore>((set) => ({
   plugins: [],
   liveMessages: [],
   edgePulses: {},
+  showLineage: false,
 
   setGraph: (agents, edges, particles) => set({
     agents,
@@ -64,6 +67,7 @@ export const useFederationStore = create<FederationStore>((set) => ({
   setHovered: (id) => set({ hovered: id }),
 
   setPlugins: (plugins) => set({ plugins }),
+  toggleLineage: () => set((s) => ({ showLineage: !s.showLineage })),
 
   handleFeedEvent: (e) => set((s) => {
     if (BUSY_EVENTS.has(e.event)) {

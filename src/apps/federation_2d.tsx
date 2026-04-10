@@ -9,7 +9,7 @@ import { machineColor } from "../components/federation/colors";
 
 function App() {
   const { connected, mqttConnected } = useFederationData();
-  const { machines, agents, edges, version, plugins } = useFederationStore();
+  const { machines, agents, edges, version, plugins, showLineage, toggleLineage } = useFederationStore();
 
   const totalAgents = agents.length;
   const msgCount = edges.filter(e => e.type === "message").reduce((s, e) => s + e.count, 0);
@@ -38,7 +38,7 @@ function App() {
           <span>&middot;</span>
           <span>{syncCount} sync</span>
           <span>&middot;</span>
-          <span className="text-cyan-400/40">{lineageCount} lineage</span>
+          <button onClick={toggleLineage} className={`cursor-pointer hover:text-cyan-400/60 ${showLineage ? "text-cyan-400/40" : "text-white/15 line-through"}`}>{lineageCount} lineage</button>
           {plugins.length > 0 && <><span>&middot;</span><span className="text-purple-400/40">{plugins.length} plugins</span></>}
           {version && <><span>&middot;</span><span>v{version}</span></>}
         </div>

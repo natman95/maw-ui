@@ -56,10 +56,12 @@ export function drawEdges(
   particles: Map<string, Particle[]>,
   time: number,
   edgePulses?: Record<string, number>,
+  showLineage?: boolean,
 ) {
   for (const edge of edges) {
     const a = byId.get(edge.source), b = byId.get(edge.target);
     if (!a || !b) continue;
+    if (edge.type === "lineage" && !showLineage) continue;
 
     const isHighlighted = sel === a.id || sel === b.id || hov === a.id || hov === b.id;
     const dimmed = sel && !isHighlighted;
