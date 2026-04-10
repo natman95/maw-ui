@@ -24,9 +24,16 @@ export interface Particle {
   speed: number;
 }
 
+export interface LiveMessage {
+  from: string;
+  to: string;
+  ts: number;
+}
+
 export const BUSY_EVENTS = new Set<FeedEventType>([
   "PreToolUse", "PostToolUse", "UserPromptSubmit", "SubagentStart",
   "PostToolUseFailure", "PluginHook", "PluginFilter", "PluginLoad",
+  "MessageSend", "MessageDeliver",
 ]);
 
 export const STOP_EVENTS = new Set<FeedEventType>(["Stop", "SessionEnd", "Notification"]);

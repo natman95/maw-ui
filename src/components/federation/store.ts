@@ -1,7 +1,16 @@
 import { create } from "zustand";
-import type { AgentNode, AgentEdge, Particle } from "./types";
+import type { AgentNode, AgentEdge, Particle, LiveMessage } from "./types";
 import type { FeedEvent } from "../../lib/feed";
 import { BUSY_EVENTS, STOP_EVENTS } from "./types";
+
+export interface PluginInfo {
+  name: string;
+  type: string;
+  events: number;
+  errors: number;
+  lastEvent: string;
+  loadedAt: string;
+}
 
 interface FederationStore {
   agents: AgentNode[];
@@ -13,13 +22,18 @@ interface FederationStore {
   hovered: string | null;
   version: string;
   particles: Map<string, Particle[]>;
+  plugins: PluginInfo[];
+  liveMessages: LiveMessage[];
+  edgePulses: Record<string, number>; // edge key -> timestamp of last pulse
 
   setGraph: (agents: AgentNode[], edges: AgentEdge[], particles: Map<string, Particle[]>) => void;
   setVersion: (v: string) => void;
   setSelected: (id: string | null) => void;
   setHovered: (id: string | null) => void;
+  setPlugins: (plugins: PluginInfo[]) => void;
   handleFeedEvent: (e: FeedEvent) => void;
   handleFeedHistory: (events: FeedEvent[]) => void;
+  handleLiveMessage: (from: string, to: string) => void;
 }
 
 export const useFederationStore = create<FederationStore>((set) => ({
@@ -32,6 +46,9 @@ export const useFederationStore = create<FederationStore>((set) => ({
   hovered: null,
   version: "",
   particles: new Map(),
+  plugins: [],
+  liveMessages: [],
+  edgePulses: {},
 
   setGraph: (agents, edges, particles) => set({
     agents,
@@ -45,6 +62,8 @@ export const useFederationStore = create<FederationStore>((set) => ({
   setSelected: (id) => set((s) => ({ selected: s.selected === id ? null : id })),
 
   setHovered: (id) => set({ hovered: id }),
+
+  setPlugins: (plugins) => set({ plugins }),
 
   handleFeedEvent: (e) => set((s) => {
     if (BUSY_EVENTS.has(e.event)) {
@@ -66,5 +85,19 @@ export const useFederationStore = create<FederationStore>((set) => ({
       else if (STOP_EVENTS.has(e.event)) st[e.oracle] = "ready";
     }
     return { statuses: st };
+  }),
+
+  handleLiveMessage: (from, to) => set((s) => {
+    const now = Date.now();
+    const key = [from, to].sort().join("-");
+    const msg: LiveMessage = { from, to, ts: now };
+    // Keep last 50 live messages
+    const msgs = [...s.liveMessages, msg].slice(-50);
+    // Pulse both agents + the edge
+    return {
+      liveMessages: msgs,
+      edgePulses: { ...s.edgePulses, [key]: now },
+      flashes: { ...s.flashes, [from]: now, [to]: now },
+    };
   }),
 }));

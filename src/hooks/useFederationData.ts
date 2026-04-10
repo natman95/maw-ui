@@ -1,5 +1,6 @@
 import { useEffect, useCallback } from "react";
 import { useWebSocket } from "./useWebSocket";
+import { useMqtt } from "./useMqtt";
 import { apiUrl } from "../lib/api";
 import { useFederationStore } from "../components/federation/store";
 import { simulate } from "../components/federation/simulation";
@@ -7,28 +8,65 @@ import type { AgentNode, AgentEdge, Particle } from "../components/federation/ty
 import type { FeedEvent } from "../lib/feed";
 
 export function useFederationData() {
-  const { setGraph, setVersion, handleFeedEvent, handleFeedHistory } = useFederationStore();
+  const { setGraph, setVersion, setPlugins, handleFeedEvent, handleFeedHistory, handleLiveMessage } = useFederationStore();
 
   const handleMessage = useCallback((data: any) => {
     if (data.type === "feed") {
-      handleFeedEvent(data.event as FeedEvent);
+      const e = data.event as FeedEvent;
+      handleFeedEvent(e);
+
+      // MessageSend: oracle = sender node, message = "{target}: {body}"
+      if (e.event === "MessageSend" && e.message) {
+        const colonIdx = e.message.indexOf(": ");
+        if (colonIdx > 0) {
+          const to = e.message.slice(0, colonIdx).replace(/^.*:/, "").replace(/-oracle$/, "");
+          const from = e.oracle.replace(/-oracle$/, "");
+          if (from && to) handleLiveMessage(from, to);
+        }
+      }
+
+      // Also catch relay messages: [node:oracle] → body
+      if (e.event === "UserPromptSubmit" && e.message) {
+        const relay = e.message.match(/^\[([^\]]+)\]\s*[→>]\s*/);
+        if (relay) {
+          const from = relay[1].replace(/^.*:/, "").replace(/-oracle$/, "");
+          const to = e.oracle.replace(/-oracle$/, "");
+          if (from && to && from !== to) handleLiveMessage(from, to);
+        }
+      }
     } else if (data.type === "feed-history") {
       handleFeedHistory(data.events as FeedEvent[]);
+    } else if (data.type === "message") {
+      // Direct maw hey message event from WebSocket
+      const from = data.from?.replace(/^.*:/, "").replace(/-oracle$/, "") || "";
+      const to = data.to?.replace(/^.*:/, "").replace(/-oracle$/, "") || "";
+      if (from && to) handleLiveMessage(from, to);
     }
-  }, [handleFeedEvent, handleFeedHistory]);
+  }, [handleFeedEvent, handleFeedHistory, handleLiveMessage]);
 
   const { connected } = useWebSocket(handleMessage);
 
+  // MQTT subscription for cross-federation maw hey messages
+  const handleMqttMessage = useCallback((msg: { from: string; to: string }) => {
+    const from = msg.from.replace(/-oracle$/, "");
+    const to = msg.to.replace(/-oracle$/, "");
+    if (from && to) handleLiveMessage(from, to);
+  }, [handleLiveMessage]);
+
+  const { connected: mqttConnected } = useMqtt(handleMqttMessage);
+
   useEffect(() => {
     async function load() {
-      const [identity, config, fleet, messages] = await Promise.all([
+      const [identity, config, fleet, messages, pluginData] = await Promise.all([
         fetch(apiUrl("/api/identity")).then(r => r.json()).catch(() => null),
         fetch(apiUrl("/api/config")).then(r => r.json()).catch(() => null),
         fetch(apiUrl("/api/fleet")).then(r => r.json()).catch(() => null),
         fetch(apiUrl("/api/messages?limit=500")).then(r => r.json()).catch(() => null),
+        fetch(apiUrl("/api/plugins")).then(r => r.json()).catch(() => null),
       ]);
 
       if (identity?.version) setVersion(identity.version);
+      if (pluginData?.plugins) setPlugins(pluginData.plugins);
 
       // Agent -> machine map
       const a2m: Record<string, string> = {};
@@ -133,5 +171,5 @@ export function useFederationData() {
     return () => clearInterval(iv);
   }, [setGraph, setVersion]);
 
-  return { connected };
+  return { connected, mqttConnected };
 }

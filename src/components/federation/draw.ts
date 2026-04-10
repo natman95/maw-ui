@@ -55,6 +55,7 @@ export function drawEdges(
   hov: string | null,
   particles: Map<string, Particle[]>,
   time: number,
+  edgePulses?: Record<string, number>,
 ) {
   for (const edge of edges) {
     const a = byId.get(edge.source), b = byId.get(edge.target);
@@ -82,17 +83,39 @@ export function drawEdges(
       ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
       ctx.stroke();
     } else if (edge.type === "message") {
-      const opacity = dimmed ? 0.06 : isHighlighted ? 0.7 : 0.35;
-      const width = Math.max(1, Math.min(3, edge.count * 0.5));
+      // Check if this edge has a live pulse
+      const edgeKey = [edge.source, edge.target].sort().join("-");
+      const pulseTs = edgePulses?.[edgeKey];
+      const pulseAge = pulseTs ? Date.now() - pulseTs : Infinity;
+      const isPulsing = pulseAge < 3000;
+      const pulseI = isPulsing ? Math.max(0, 1 - pulseAge / 3000) : 0;
+
+      const opacity = dimmed ? 0.06 : isPulsing ? 0.7 + pulseI * 0.3 : isHighlighted ? 0.7 : 0.35;
+      const width = Math.max(1, Math.min(3, edge.count * 0.5)) + pulseI * 3;
       ctx.save();
-      ctx.shadowColor = "#00f5d4";
-      ctx.shadowBlur = isHighlighted ? 8 : 3;
+      ctx.shadowColor = isPulsing ? "#00ffcc" : "#00f5d4";
+      ctx.shadowBlur = isPulsing ? 15 + pulseI * 20 : isHighlighted ? 8 : 3;
       ctx.strokeStyle = `rgba(0,245,212,${opacity})`;
       ctx.lineWidth = width;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
       ctx.stroke();
       ctx.restore();
+
+      // Draw a traveling pulse particle on live message
+      if (isPulsing) {
+        const phase = (1 - pulseI); // 0→1 over 3 seconds
+        const px = a.x + (b.x - a.x) * phase;
+        const py = a.y + (b.y - a.y) * phase;
+        ctx.save();
+        ctx.shadowColor = "#00ffcc";
+        ctx.shadowBlur = 20;
+        ctx.fillStyle = `rgba(0,255,204,${0.5 + pulseI * 0.5})`;
+        ctx.beginPath();
+        ctx.arc(px, py, 3 + pulseI * 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
     }
 
     // Particles

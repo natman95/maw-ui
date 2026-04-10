@@ -4,11 +4,12 @@ import { useFederationData } from "../hooks/useFederationData";
 import { useFederationStore } from "../components/federation/store";
 import { Canvas2D } from "../components/federation/Canvas2D";
 import { Sidebar } from "../components/federation/Sidebar";
+import { PluginPanel } from "../components/federation/PluginPanel";
 import { machineColor } from "../components/federation/colors";
 
 function App() {
-  const { connected } = useFederationData();
-  const { machines, agents, edges, version } = useFederationStore();
+  const { connected, mqttConnected } = useFederationData();
+  const { machines, agents, edges, version, plugins } = useFederationStore();
 
   const totalAgents = agents.length;
   const msgCount = edges.filter(e => e.type === "message").reduce((s, e) => s + e.count, 0);
@@ -23,7 +24,10 @@ function App() {
           <h1 className="text-lg font-black tracking-tight" style={{ color: "#00f5d4" }}>Federation Mesh</h1>
         </div>
         <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${connected ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"}`}>
-          {connected ? "LIVE" : "OFFLINE"}
+          {connected ? "WS" : "OFFLINE"}
+        </span>
+        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${mqttConnected ? "bg-purple-500/15 text-purple-400" : "bg-white/5 text-white/20"}`}>
+          {mqttConnected ? "MQTT" : "MQTT OFF"}
         </span>
         <div className="flex items-center gap-3 text-[10px] font-mono text-white/20">
           <span>{machines.length} machines</span>
@@ -35,6 +39,7 @@ function App() {
           <span>{syncCount} sync</span>
           <span>&middot;</span>
           <span className="text-cyan-400/40">{lineageCount} lineage</span>
+          {plugins.length > 0 && <><span>&middot;</span><span className="text-purple-400/40">{plugins.length} plugins</span></>}
           {version && <><span>&middot;</span><span>v{version}</span></>}
         </div>
         <div className="ml-auto flex items-center gap-1.5">
@@ -46,8 +51,9 @@ function App() {
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
         <Canvas2D />
+        <PluginPanel />
         <Sidebar />
       </div>
     </div>
