@@ -12,7 +12,7 @@ export default defineConfig({
     __MAW_BUILD__: JSON.stringify(new Date().toLocaleString("sv-SE", { timeZone: "Asia/Bangkok", dateStyle: "short", timeStyle: "short" })),
   },
   root: ".",
-  base: "/",
+  base: "/maw/",
   build: {
     outDir: "dist",
     emptyOutDir: true,
@@ -21,9 +21,9 @@ export default defineConfig({
     host: true,
     allowedHosts: ["white.local"],
     proxy: {
-      "/api": "http://white.local:3456",
-      "/ws/pty": { target: "ws://white.local:3456", ws: true },
-      "/ws": { target: "ws://white.local:3456", ws: true },
+      "/maw/api": { target: "http://localhost:3456", rewrite: (path) => path.replace(/^\/maw/, "") },
+      "/maw/ws/pty": { target: "ws://localhost:3456", ws: true, rewrite: (path) => path.replace(/^\/maw/, "") },
+      "/maw/ws": { target: "ws://localhost:3456", ws: true, rewrite: (path) => path.replace(/^\/maw/, "") },
     },
   },
 });

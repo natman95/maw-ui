@@ -12,17 +12,18 @@ const hostParam = params.get("host"); // e.g. "white.local:3456"
 /** Whether we're running in remote mode */
 export const isRemote = !!hostParam;
 
+/** Resolve base path from Vite config (strips trailing slash) */
+const basePath = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
+
 /** Build full URL for fetch() calls */
 export function apiUrl(path: string): string {
-  if (!hostParam) return path;
-  return `https://${hostParam}${path}`;
+  if (hostParam) return `https://${hostParam}${path}`;
+  return `${basePath}${path}`;
 }
 
 /** WebSocket URL */
 export function wsUrl(path: string): string {
-  if (!hostParam) {
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    return `${proto}//${location.host}${path}`;
-  }
-  return `wss://${hostParam}${path}`;
+  if (hostParam) return `wss://${hostParam}${path}`;
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${location.host}${basePath}${path}`;
 }
