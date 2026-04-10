@@ -177,12 +177,12 @@ export function drawAgents(
     const dimmed = sel && !isSel && !isConnected;
 
     const flashAge = fl[agent.id] ? Date.now() - fl[agent.id] : Infinity;
-    const isFlashing = flashAge < 2000;
-    const flashI = isFlashing ? Math.max(0, 1 - flashAge / 2000) : 0;
+    const isFlashing = flashAge < 3000;
+    const flashI = isFlashing ? Math.max(0, 1 - flashAge / 3000) : 0;
 
     const baseR = isSel ? 12 : isHov ? 11 : 9;
     const pulse = status === "busy" ? Math.sin(time * 0.005) * 2 : 0;
-    const dotR = baseR + pulse + flashI * 4;
+    const dotR = baseR + pulse + flashI * 6;
 
     ctx.save();
     if (status === "busy" || isFlashing) {
