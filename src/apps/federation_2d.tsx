@@ -4,7 +4,7 @@ import { useFederationData } from "../hooks/useFederationData";
 import { useFederationStore } from "../components/federation/store";
 import { Canvas2D } from "../components/federation/Canvas2D";
 import { Sidebar } from "../components/federation/Sidebar";
-import { PluginPanel } from "../components/federation/PluginPanel";
+
 import { machineColor } from "../components/federation/colors";
 
 function App() {
@@ -51,9 +51,8 @@ function App() {
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 overflow-hidden">
         <Canvas2D />
-        <PluginPanel />
         <Sidebar />
       </div>
     </div>

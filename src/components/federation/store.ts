@@ -94,17 +94,22 @@ export const useFederationStore = create<FederationStore>((set) => ({
       updates.statuses = { ...s.statuses, [e.oracle]: "ready" };
     }
 
-    // Show UserPromptSubmit in message log as "user → oracle"
+    // Show UserPromptSubmit in message log as "user → oracle" (dedupe within 3s)
     if (e.event === "UserPromptSubmit" && e.oracle) {
       const name = e.oracle.replace(/-oracle$/, "").replace(/-view$/, "");
-      const msg: MessageEntry = {
-        from: "user",
-        to: name,
-        msg: (e.message || "").slice(0, 120),
-        ts: Date.now(),
-        live: true,
-      };
-      updates.messageLog = [msg, ...s.messageLog].slice(0, 200);
+      const now = Date.now();
+      const isDupe = s.messageLog.some(m =>
+        m.from === "user" && m.to === name && Math.abs(m.ts - now) < 3000);
+      if (!isDupe) {
+        const msg: MessageEntry = {
+          from: "user",
+          to: name,
+          msg: (e.message || "").slice(0, 120),
+          ts: now,
+          live: true,
+        };
+        updates.messageLog = [msg, ...s.messageLog].slice(0, 200);
+      }
     }
 
     return Object.keys(updates).length > 0 ? updates : s;
