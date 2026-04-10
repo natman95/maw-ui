@@ -47,7 +47,7 @@ export function PluginPanel() {
   }
 
   return (
-    <div className="absolute top-[60px] left-4 h-[200px] w-[260px] rounded-lg border overflow-hidden flex flex-col"
+    <div className="absolute top-[60px] left-4 bottom-4 w-[260px] rounded-lg border overflow-hidden flex flex-col"
       style={{
         background: "rgba(3,10,24,0.95)",
         borderColor: "rgba(255,255,255,0.06)",

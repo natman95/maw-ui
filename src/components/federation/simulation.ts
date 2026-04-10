@@ -1,5 +1,63 @@
 import type { AgentNode, AgentEdge } from "./types";
 
+export type LayoutMode = "force" | "circle" | "grid" | "tree";
+
+export function layoutCircle(agents: AgentNode[], W: number, H: number) {
+  const cx = W * 0.48, cy = H * 0.5;
+  const machines = [...new Set(agents.map(a => a.node))];
+  const r = Math.min(W, H) * 0.38;
+  let idx = 0;
+  for (const m of machines) {
+    const group = agents.filter(a => a.node === m);
+    for (const a of group) {
+      const angle = (idx / agents.length) * Math.PI * 2 - Math.PI / 2;
+      a.x = cx + Math.cos(angle) * r;
+      a.y = cy + Math.sin(angle) * r;
+      a.vx = 0; a.vy = 0;
+      idx++;
+    }
+  }
+}
+
+export function layoutGrid(agents: AgentNode[], W: number, H: number) {
+  const machines = [...new Set(agents.map(a => a.node))];
+  const cols = Math.ceil(Math.sqrt(agents.length));
+  const cellW = (W - 100) / cols;
+  const cellH = (H - 100) / Math.ceil(agents.length / cols);
+  let idx = 0;
+  for (const m of machines) {
+    const group = agents.filter(a => a.node === m);
+    for (const a of group) {
+      const col = idx % cols;
+      const row = Math.floor(idx / cols);
+      a.x = 50 + col * cellW + cellW / 2;
+      a.y = 50 + row * cellH + cellH / 2;
+      a.vx = 0; a.vy = 0;
+      idx++;
+    }
+  }
+}
+
+export function layoutTree(agents: AgentNode[], edges: AgentEdge[], W: number, H: number) {
+  const machines = [...new Set(agents.map(a => a.node))];
+  const machineW = (W - 60) / machines.length;
+
+  for (let mi = 0; mi < machines.length; mi++) {
+    const group = agents.filter(a => a.node === machines[mi]);
+    const x = 30 + mi * machineW + machineW / 2;
+    // Find root (no buddedFrom in this group)
+    const roots = group.filter(a => !a.buddedFrom || !group.some(g => g.id === a.buddedFrom));
+    const others = group.filter(a => !roots.includes(a));
+    const all = [...roots, ...others];
+    const rowH = (H - 100) / Math.max(all.length, 1);
+    all.forEach((a, i) => {
+      a.x = x + (i % 2 === 0 ? -20 : 20);
+      a.y = 50 + i * rowH + rowH / 2;
+      a.vx = 0; a.vy = 0;
+    });
+  }
+}
+
 export function simulate(agents: AgentNode[], edges: AgentEdge[], W: number, H: number) {
   const cx = W * 0.48, cy = H * 0.5;
 
