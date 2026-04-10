@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import mqtt from "mqtt";
 
-const BROKER = "wss://maw-mqtt-bridge.laris.workers.dev/ws/mqtt";
+const BROKER = "wss://dustboy-wss-bridge.laris.workers.dev/mqtt";
 const TOPIC = "maw/v1/hey/#";
 
 export interface MqttMessage {
@@ -23,8 +23,6 @@ export function useMqtt(onMessage: MqttMessageHandler) {
     const client = mqtt.connect(BROKER, {
       reconnectPeriod: 5000,
       connectTimeout: 10000,
-      protocolVersion: 4,
-      wsOptions: { protocols: ["mqtt"] },
     });
 
     client.on("connect", () => {
