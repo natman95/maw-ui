@@ -63,6 +63,8 @@ export function drawEdges(
     const a = byId.get(edge.source), b = byId.get(edge.target);
     if (!a || !b) continue;
     if (edge.type === "lineage" && !showLineage) continue;
+    // Hide sync edges when history edges are hidden
+    if (edge.type === "sync" && showHistoryEdges === false) continue;
     // Hide historical message edges unless they have an active pulse
     if (edge.type === "message" && showHistoryEdges === false) {
       const ek = [edge.source, edge.target].sort().join("-");
