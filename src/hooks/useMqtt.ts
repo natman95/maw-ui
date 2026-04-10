@@ -23,14 +23,21 @@ export function useMqtt(onMessage: MqttMessageHandler) {
     const client = mqtt.connect(BROKER, {
       reconnectPeriod: 5000,
       connectTimeout: 10000,
+      protocolVersion: 4,
+      wsOptions: { protocols: ["mqtt"] },
     });
 
     client.on("connect", () => {
+      console.log("[mqtt] connected to", BROKER);
       setConnected(true);
-      client.subscribe(TOPIC);
+      client.subscribe(TOPIC, (err) => {
+        if (err) console.error("[mqtt] subscribe error:", err);
+        else console.log("[mqtt] subscribed to", TOPIC);
+      });
     });
 
     client.on("close", () => setConnected(false));
+    client.on("error", (err) => console.error("[mqtt] error:", err));
 
     client.on("message", (topic: string, payload: Buffer) => {
       try {
