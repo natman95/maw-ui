@@ -1,11 +1,5 @@
+import { useState } from "react";
 import { useFederationStore } from "./store";
-
-const PHASE_COLORS: Record<string, string> = {
-  gate: "#f15bb5",
-  filter: "#fee440",
-  handle: "#00f5d4",
-  late: "#9b5de5",
-};
 
 const TYPE_ICONS: Record<string, string> = {
   ts: "TS",
@@ -15,11 +9,26 @@ const TYPE_ICONS: Record<string, string> = {
 
 export function PluginPanel() {
   const { plugins, liveMessages } = useFederationStore();
+  const [open, setOpen] = useState(false);
 
-  if (plugins.length === 0) return null;
+  if (plugins.length === 0 && liveMessages.length === 0) return null;
 
   const totalEvents = plugins.reduce((s, p) => s + p.events, 0);
-  const totalErrors = plugins.reduce((s, p) => s + p.errors, 0);
+
+  // Collapsed: just a small pill
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)}
+        className="absolute bottom-4 left-4 flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border cursor-pointer hover:bg-white/[0.05] transition-colors"
+        style={{ background: "rgba(3,10,24,0.9)", borderColor: "rgba(255,255,255,0.08)" }}>
+        <span className="text-[9px]">{"\uD83E\uDDE9"}</span>
+        <span className="text-[9px] font-mono text-white/40">{plugins.length}</span>
+        {liveMessages.length > 0 && (
+          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+        )}
+      </button>
+    );
+  }
 
   return (
     <div className="absolute bottom-4 left-4 w-[280px] rounded-lg border overflow-hidden"
@@ -29,14 +38,13 @@ export function PluginPanel() {
         backdropFilter: "blur(12px)",
       }}>
 
-      <div className="flex items-center gap-2 px-3 py-2 border-b"
-        style={{ borderColor: "rgba(255,255,255,0.06)" }}>
-        <span className="text-[10px]">{"🧩"}</span>
+      <div className="flex items-center gap-2 px-3 py-2 border-b cursor-pointer hover:bg-white/[0.03]"
+        style={{ borderColor: "rgba(255,255,255,0.06)" }}
+        onClick={() => setOpen(false)}>
+        <span className="text-[10px]">{"\uD83E\uDDE9"}</span>
         <span className="text-[10px] font-mono font-bold text-white/60">Plugins</span>
         <span className="text-[9px] font-mono text-white/25 ml-auto">{totalEvents} events</span>
-        {totalErrors > 0 && (
-          <span className="text-[9px] font-mono text-red-400">{totalErrors} err</span>
-        )}
+        <span className="text-[9px] text-white/20">{"\u2715"}</span>
       </div>
 
       <div className="max-h-[200px] overflow-y-auto">
@@ -63,7 +71,7 @@ export function PluginPanel() {
         <>
           <div className="flex items-center gap-2 px-3 py-1.5 border-t"
             style={{ borderColor: "rgba(255,255,255,0.06)" }}>
-            <span className="text-[10px]">{"💬"}</span>
+            <span className="text-[10px]">{"\uD83D\uDCAC"}</span>
             <span className="text-[9px] font-mono text-cyan-400/50">Live Messages</span>
           </div>
           <div className="max-h-[80px] overflow-y-auto">
