@@ -15,10 +15,8 @@ export function PluginPanel() {
 
   const totalEvents = plugins.reduce((s, p) => s + p.events, 0);
 
-  if (liveMessages.length === 0 && !open) return null;
-
   return (
-    <div className="absolute bottom-4 left-4 w-[240px] rounded-lg border overflow-hidden"
+    <div className="absolute bottom-4 left-4 top-[60px] w-[240px] rounded-lg border overflow-hidden flex flex-col"
       style={{
         background: "rgba(3,10,24,0.95)",
         borderColor: "rgba(255,255,255,0.08)",
@@ -26,34 +24,36 @@ export function PluginPanel() {
       }}>
 
       {/* Live Messages — always visible */}
-      {liveMessages.length > 0 && (
-        <div>
-          <div className="flex items-center gap-2 px-3 py-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-            <span className="text-[9px] font-mono text-cyan-400/60">Live</span>
-            {plugins.length > 0 && (
-              <button onClick={() => setOpen(!open)}
-                className="text-[8px] font-mono text-white/20 ml-auto hover:text-white/40 cursor-pointer">
-                {open ? "\u2715" : `\uD83E\uDDE9 ${plugins.length}`}
-              </button>
-            )}
-          </div>
-          <div className="max-h-[300px] overflow-y-auto">
-            {[...liveMessages].reverse().slice(0, 20).map((m, i) => {
-              const age = Math.floor((Date.now() - m.ts) / 1000);
-              const clean = (s: string) => s.replace(/-view$/, "").replace(/-oracle$/, "");
-              return (
-                <div key={i} className="flex items-center gap-1.5 px-3 py-0.5 text-[9px] font-mono">
-                  <span className="text-cyan-400/60">{clean(m.from)}</span>
-                  <span className="text-white/20">{"\u2192"}</span>
-                  <span className="text-cyan-400/60">{clean(m.to)}</span>
-                  <span className="text-white/15 ml-auto">{age < 60 ? `${age}s` : `${Math.floor(age / 60)}m`}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        {liveMessages.length > 0
+          ? <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+          : <span className="w-1.5 h-1.5 rounded-full bg-white/10" />}
+        <span className="text-[9px] font-mono text-cyan-400/60">Live</span>
+        {plugins.length > 0 && (
+          <button onClick={() => setOpen(!open)}
+            className="text-[8px] font-mono text-white/20 ml-auto hover:text-white/40 cursor-pointer">
+            {open ? "\u2715" : `\uD83E\uDDE9 ${plugins.length}`}
+          </button>
+        )}
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {liveMessages.length > 0 ? (
+          [...liveMessages].reverse().map((m, i) => {
+            const age = Math.floor((Date.now() - m.ts) / 1000);
+            const clean = (s: string) => s.replace(/-view$/, "").replace(/-oracle$/, "");
+            return (
+              <div key={i} className="flex items-center gap-1.5 px-3 py-0.5 text-[9px] font-mono">
+                <span className="text-cyan-400/60">{clean(m.from)}</span>
+                <span className="text-white/20">{"\u2192"}</span>
+                <span className="text-cyan-400/60">{clean(m.to)}</span>
+                <span className="text-white/15 ml-auto">{age < 60 ? `${age}s` : `${Math.floor(age / 60)}m`}</span>
+              </div>
+            );
+          })
+        ) : (
+          <div className="px-3 py-2 text-[9px] font-mono text-white/15">waiting for maw hey...</div>
+        )}
+      </div>
 
       {/* Plugins — only when expanded */}
       {open && plugins.length > 0 && (
