@@ -312,8 +312,17 @@ export function App() {
     }
   }, [agents]);
 
-  // Close terminal when hash loses the agent part (e.g. browser back)
+  // Close terminal when hash loses the agent part (e.g. browser back).
+  // Uses a ref guard to avoid racing with onSelectAgent: the hashchange
+  // event fires AFTER React batches the selectedAgent state update, so
+  // without the guard, this effect sees hashAgent=null + selectedAgent=set
+  // and immediately clears the selection on the first click.
+  const justSelectedRef = useRef(false);
   useEffect(() => {
+    if (justSelectedRef.current) {
+      justSelectedRef.current = false;
+      return;
+    }
     if (!hashAgent && selectedAgent) {
       setSelectedAgent(null);
     }
@@ -329,6 +338,7 @@ export function App() {
   const { connected, reconnecting, send } = useWebSocket(handleMessage);
 
   const onSelectAgent = useCallback((agent: AgentState) => {
+    justSelectedRef.current = true;
     setSelectedAgent(agent);
     send({ type: "select", target: agent.target });
     // Push agent name into URL hash for deep-linking
