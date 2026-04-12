@@ -1,5 +1,5 @@
 import { memo, useState, useEffect, useRef, type ReactNode } from "react";
-import { apiUrl, isRemote } from "../lib/api";
+import { apiUrl, isRemote, activeHost, hostSource } from "../lib/api";
 import { SOUND_PROFILES, getSoundProfile, setSoundProfile, previewSound, type SoundProfile } from "../lib/sounds";
 
 function SoundButton({ muted, onToggleMute }: { muted: boolean; onToggleMute: () => void }) {
@@ -119,10 +119,10 @@ export const StatusBar = memo(function StatusBar({ connected, agentCount, sessio
         {connected ? "LIVE" : "..."}
       </span>
 
-      {isRemote && (
-        <span className="text-[10px] font-mono px-2 py-0.5 rounded-md whitespace-nowrap" style={{ background: "rgba(251,191,36,0.12)", color: "#fbbf24", border: "1px solid rgba(251,191,36,0.2)" }}>
-          {new URLSearchParams(window.location.search).get("host")}
-        </span>
+      {isRemote && activeHost && (
+        <a href="#config" className="text-[10px] font-mono px-2 py-0.5 rounded-md whitespace-nowrap no-underline hover:brightness-125 transition-all" style={{ background: hostSource === "config" ? "rgba(168,85,247,0.12)" : "rgba(251,191,36,0.12)", color: hostSource === "config" ? "#c084fc" : "#fbbf24", border: `1px solid ${hostSource === "config" ? "rgba(168,85,247,0.2)" : "rgba(251,191,36,0.2)"}` }}>
+          {activeHost}{hostSource === "config" ? " (saved)" : ""}
+        </a>
       )}
 
       <span className="text-sm text-white/70 whitespace-nowrap">

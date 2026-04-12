@@ -1,6 +1,126 @@
 import { memo, useState, useEffect, useCallback, useRef } from "react";
 import Editor from "@monaco-editor/react";
-import { apiUrl } from "../lib/api";
+import { apiUrl, getStoredHost, setStoredHost, clearStoredHost, getRecentHosts, activeHost, hostSource } from "../lib/api";
+
+function ConnectionSettings() {
+  const [host, setHost] = useState(() => getStoredHost() || "");
+  const [testing, setTesting] = useState(false);
+  const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null);
+  const recent = getRecentHosts();
+
+  const testConnection = useCallback(async (h: string) => {
+    if (!h.trim()) return;
+    setTesting(true);
+    setStatus(null);
+    try {
+      // Build the test URL using same logic as resolveHost
+      let base: string;
+      if (h.startsWith("http://") || h.startsWith("https://")) {
+        base = h.replace(/\/+$/, "");
+      } else {
+        base = `https://${h.replace(/\/+$/, "")}`;
+      }
+      const res = await fetch(`${base}/api/config`, { signal: AbortSignal.timeout(5000) });
+      if (res.ok) {
+        const data = await res.json();
+        const node = data.node || "unknown";
+        setStatus({ ok: true, msg: `Connected — node: ${node}` });
+      } else {
+        setStatus({ ok: false, msg: `HTTP ${res.status}` });
+      }
+    } catch (e: any) {
+      setStatus({ ok: false, msg: e.message || "Connection failed" });
+    } finally {
+      setTesting(false);
+    }
+  }, []);
+
+  const handleSave = useCallback(() => {
+    if (!host.trim()) {
+      clearStoredHost();
+      setStatus({ ok: true, msg: "Cleared — using local" });
+      setTimeout(() => window.location.reload(), 800);
+      return;
+    }
+    setStoredHost(host.trim());
+    setStatus({ ok: true, msg: "Saved — reloading..." });
+    setTimeout(() => {
+      // Strip ?host= from URL if present (config takes over)
+      const url = new URL(window.location.href);
+      url.searchParams.delete("host");
+      window.location.href = url.toString();
+    }, 600);
+  }, [host]);
+
+  const handleClear = useCallback(() => {
+    clearStoredHost();
+    setHost("");
+    setStatus({ ok: true, msg: "Cleared — reloading..." });
+    setTimeout(() => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("host");
+      window.location.href = url.toString();
+    }, 600);
+  }, []);
+
+  const currentDisplay = activeHost
+    ? `${activeHost} (${hostSource})`
+    : "local (same-origin)";
+
+  return (
+    <div className="border-b border-white/[0.06] px-3 py-3">
+      <div className="text-[10px] font-mono text-white/30 tracking-[2px] uppercase mb-2">Connection</div>
+      <div className="flex items-center gap-1.5 mb-2">
+        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: activeHost ? "#c084fc" : "#4caf50" }} />
+        <span className="text-[10px] font-mono text-white/40 truncate">{currentDisplay}</span>
+      </div>
+      <div className="flex gap-1 mb-1">
+        <input
+          type="text"
+          value={host}
+          onChange={e => setHost(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") handleSave(); }}
+          placeholder="host:port or https://..."
+          className="flex-1 min-w-0 bg-transparent text-white/80 outline-none font-mono text-[11px] px-1.5 py-1 rounded border border-white/10 [&::-webkit-search-cancel-button]:hidden [&::-webkit-clear-button]:hidden [&::-ms-clear]:hidden"
+          style={{ WebkitAppearance: "none" as any }}
+          spellCheck={false}
+        />
+      </div>
+      <div className="flex gap-1 mb-1">
+        <button onClick={() => testConnection(host)} disabled={testing || !host.trim()} className="text-[10px] font-mono px-2 py-1 rounded bg-cyan-400/10 text-cyan-400/70 hover:text-cyan-400 transition-colors disabled:opacity-30">
+          {testing ? "..." : "Test"}
+        </button>
+        <button onClick={handleSave} className="text-[10px] font-mono px-2 py-1 rounded bg-purple-400/10 text-purple-400/70 hover:text-purple-400 transition-colors">
+          Save
+        </button>
+        {getStoredHost() && (
+          <button onClick={handleClear} className="text-[10px] font-mono px-2 py-1 rounded bg-red-400/10 text-red-400/70 hover:text-red-400 transition-colors">
+            Clear
+          </button>
+        )}
+      </div>
+      {status && (
+        <div className="text-[10px] font-mono mt-1" style={{ color: status.ok ? "#4caf50" : "#ef5350" }}>
+          {status.msg}
+        </div>
+      )}
+      {recent.length > 0 && (
+        <div className="mt-2">
+          <div className="text-[9px] font-mono text-white/20 mb-1">Recent</div>
+          {recent.map(h => (
+            <button
+              key={h}
+              onClick={() => { setHost(h); testConnection(h); }}
+              className="block w-full text-left text-[10px] font-mono px-1.5 py-1 rounded truncate text-white/30 hover:text-white/60 hover:bg-white/[0.04] transition-colors"
+            >
+              {h}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PinSettings() {
   const [pin, setPin] = useState("");
@@ -303,6 +423,8 @@ export const ConfigView = memo(function ConfigView() {
           })()}
         </div>
 
+        {/* Connection Settings */}
+        <ConnectionSettings />
         {/* PIN Settings */}
         <PinSettings />
       </div>

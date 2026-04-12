@@ -26,11 +26,51 @@
  * incident #5 in the night's count).
  */
 
+const STORAGE_KEY = "maw-host";
+const RECENT_KEY = "maw-host-recent";
+
 const params = new URLSearchParams(window.location.search);
-const hostParam = params.get("host");
+const urlHost = params.get("host");
+const hostParam = urlHost ?? localStorage.getItem(STORAGE_KEY);
 
 /** Whether we're running in remote mode */
 export const isRemote = !!hostParam;
+
+/** Where the active host came from */
+export const hostSource: "url" | "config" | "local" =
+  urlHost ? "url" : localStorage.getItem(STORAGE_KEY) ? "config" : "local";
+
+/** Raw active host value (from URL or config) */
+export const activeHost: string | null = hostParam;
+
+/** Read stored host from config */
+export function getStoredHost(): string | null {
+  return localStorage.getItem(STORAGE_KEY);
+}
+
+/** Save host to config + add to recent list */
+export function setStoredHost(host: string): void {
+  localStorage.setItem(STORAGE_KEY, host);
+  addRecentHost(host);
+}
+
+/** Clear stored host (revert to local) */
+export function clearStoredHost(): void {
+  localStorage.removeItem(STORAGE_KEY);
+}
+
+/** Get recent hosts list */
+export function getRecentHosts(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+  } catch { return []; }
+}
+
+function addRecentHost(host: string): void {
+  const recent = getRecentHosts().filter(h => h !== host);
+  recent.unshift(host);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(recent.slice(0, 8)));
+}
 
 /** Resolved {protocol, host:port} from `hostParam`, or null if same-origin. */
 function resolveHost(): { httpProto: string; wsProto: string; host: string } | null {
