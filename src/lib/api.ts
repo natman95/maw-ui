@@ -35,14 +35,18 @@ export const isRemote = !!hostParam;
 /** Resolved {protocol, host:port} from `hostParam`, or null if same-origin. */
 function resolveHost(): { httpProto: string; wsProto: string; host: string } | null {
   if (!hostParam) return null;
+  // Strip trailing slash — browsers often append one to the URL, which
+  // causes double-slash in constructed paths: "localhost:3456/" + "/api/config"
+  // → "localhost:3456//api/config". The double-slash misses the CORS middleware
+  // (mounted on "/api/*", not "//api/*") and breaks everything.
   if (hostParam.startsWith("https://")) {
-    return { httpProto: "https:", wsProto: "wss:", host: hostParam.slice("https://".length) };
+    return { httpProto: "https:", wsProto: "wss:", host: hostParam.slice("https://".length).replace(/\/+$/, "") };
   }
   if (hostParam.startsWith("http://")) {
-    return { httpProto: "http:", wsProto: "ws:", host: hostParam.slice("http://".length) };
+    return { httpProto: "http:", wsProto: "ws:", host: hostParam.slice("http://".length).replace(/\/+$/, "") };
   }
   // Bare host:port — default to https for backwards compatibility.
-  return { httpProto: "https:", wsProto: "wss:", host: hostParam };
+  return { httpProto: "https:", wsProto: "wss:", host: hostParam.replace(/\/+$/, "") };
 }
 
 /** Build full URL for fetch() calls */
