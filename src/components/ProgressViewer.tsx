@@ -1,7 +1,6 @@
 import { memo, useMemo, useRef, useEffect, useState, useCallback } from "react";
-import { agentColor } from "../lib/constants";
+import { agentColor, agentIcon } from "../lib/constants";
 import { describeActivity, type FeedEvent } from "../lib/feed";
-import { AgentAvatar } from "./AgentAvatar";
 
 const EVENT_LABELS: Record<string, { icon: string; label: string; color: string }> = {
   PreToolUse: { icon: "🔧", label: "Tool call", color: "#fbbf24" },
@@ -87,7 +86,12 @@ const OracleTimeline = memo(function OracleTimeline({
         style={{ borderBottom: expanded ? "1px solid rgba(255,255,255,0.06)" : "none" }}
         onClick={onToggle}
       >
-        <AgentAvatar name={group.oracle + "-oracle"} size={36} />
+        <div
+          className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-sm font-bold"
+          style={{ background: color, color: "#000", opacity: 0.9 }}
+        >
+          {agentIcon(group.oracle + "-oracle") || group.oracle.charAt(0).toUpperCase()}
+        </div>
         <div className="flex-1">
           <h3 className="font-mono font-bold" style={{ color }}>{group.oracle}</h3>
           <p className="font-mono text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>
@@ -145,7 +149,7 @@ export function ProgressViewer({ feedEvents }: { feedEvents: FeedEvent[] }) {
         oracle,
         events: sorted.slice(0, 30),
         lastActive: last?.ts || 0,
-        currentActivity: describeActivity(last),
+        currentActivity: last ? describeActivity(last) : "—",
       });
     }
 
