@@ -96,38 +96,36 @@ function formatTokens(n: number): string {
 
 interface RateData { inputTokens: number; outputTokens: number; totalTokens: number; totalPerMin: number; inputPerMin: number; outputPerMin: number; turns: number }
 
+// Module-level kill switch — survives remounts, gates all network attempts.
+// TODO: remove + migrate to /api/costs once FORGE/Neo fix the handler
+// (currently returns `{"error":"cannot reach maw server"}` despite handler
+// in src/api/costs.ts:185). See outbox 2026-04-20_0902_to-neo_api-costs-broken.md.
+let tokenRateGone = false;
+
 function useTokenRate() {
   const [lastHourRate, setLastHourRate] = useState<RateData | null>(null);
   useEffect(() => {
-    let stopped = false;
-    let warned = false;
+    if (tokenRateGone) return;
+    let cancelled = false;
     const fetch_ = async () => {
-      if (stopped) return;
+      if (tokenRateGone || cancelled) return;
       try {
-        const data = await cached(
-          "tokens-rate-1h",
-          30_000,
-          async () => {
-            const r = await fetch(apiUrl("/api/tokens/rate?mode=window&window=3600"));
-            // TODO: migrate to /api/costs once FORGE/Neo fix the handler (currently returns
-            // `{"error":"cannot reach maw server"}` despite handler in src/api/costs.ts:185).
-            // Until then: stop polling on 410 Gone to keep console clean.
-            if (r.status === 410) {
-              if (!warned) { console.warn("[tokens-rate] endpoint 410 Gone — polling stopped until /api/costs is live"); warned = true; }
-              stopped = true;
-              return null;
-            }
-            if (!r.ok) return null;
-            return r.json() as Promise<RateData>;
-          },
-          { tag: "tokens-rate" },
-        );
-        if (data) setLastHourRate(data);
+        // Intentionally NOT wrapped in cached() — SWR bg refresh would keep
+        // retrying the dead endpoint. Direct fetch gives us clean one-shot control.
+        const r = await fetch(apiUrl("/api/tokens/rate?mode=window&window=3600"));
+        if (r.status === 410) {
+          tokenRateGone = true;
+          console.warn("[tokens-rate] endpoint 410 Gone — polling stopped until /api/costs is live");
+          return;
+        }
+        if (!r.ok) return;
+        const data = (await r.json()) as RateData;
+        if (!cancelled) setLastHourRate(data);
       } catch { /* silent */ }
     };
     fetch_();
     const iv = setInterval(fetch_, 30000);
-    return () => { stopped = true; clearInterval(iv); };
+    return () => { cancelled = true; clearInterval(iv); };
   }, []);
   return { lastHourRate };
 }
