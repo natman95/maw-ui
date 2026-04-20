@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../lib/apiFetch";
+import { cached } from "../lib/cache";
 
 interface OracleConsciousness {
   name: string;
@@ -36,7 +37,12 @@ export function ConsciousnessView() {
 
   const fetchData = useCallback(async () => {
     try {
-      const data = await apiFetch<{ oracles: OracleConsciousness[] }>("/api/consciousness");
+      const data = await cached(
+        "consciousness",
+        30_000,
+        () => apiFetch<{ oracles: OracleConsciousness[] }>("/api/consciousness"),
+        { tag: "consciousness" },
+      );
       setOracles(data.oracles || []);
     } catch { setOracles([]); }
     setLoading(false);
