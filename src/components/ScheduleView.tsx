@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "../lib/apiFetch";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { PageShell } from "./PageShell";
 
 interface ScheduleEvent {
   id: number;
@@ -352,7 +353,7 @@ export function ScheduleView() {
   const inputStyle = "bg-black/50 border border-white/[0.08] rounded-lg px-3 py-2 text-xs font-mono text-white/80 outline-none focus:border-cyan-400/30 placeholder:text-white/15";
 
   return (
-    <div className="px-3 sm:px-6 py-4 sm:py-6 max-w-4xl mx-auto">
+    <PageShell maxWidth="896px">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 sm:mb-6">
         <div>
@@ -448,6 +449,6 @@ export function ScheduleView() {
           ))}
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }

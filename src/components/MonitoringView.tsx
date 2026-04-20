@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "../lib/apiFetch";
 import { agentColor, agentIcon } from "../lib/constants";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { PageShell } from "./PageShell";
 
 interface OracleHealth {
   name: string;
@@ -386,7 +387,7 @@ export function MonitoringView() {
   ];
 
   return (
-    <div className="px-3 sm:px-6 py-4 sm:py-6 max-w-6xl mx-auto">
+    <PageShell maxWidth="1152px">
       {/* Header */}
       <div className="flex items-center justify-between mb-4 sm:mb-6">
         <div>
@@ -444,6 +445,6 @@ export function MonitoringView() {
           <SnapshotList snapshots={snapshots} />
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }
