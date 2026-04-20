@@ -104,7 +104,8 @@ const TOOL_ICONS: Record<string, string> = {
  * Human-readable one-liner for what the oracle is doing.
  */
 export function describeActivity(event: FeedEvent): string {
-  const msg = event.message || "";
+  if (!event) return "—";
+  const msg = event.message ?? "";
   switch (event.event) {
     case "PreToolUse": {
       // Message format: "ToolName: details..." or "ToolName ✓"

@@ -152,12 +152,12 @@ export function useSessions() {
     const oracleName = agent?.name || event.oracle;
 
     // Capture Stop message — this has the actual question text
-    if (event.event === "Stop" && event.message.trim()) {
+    if (event.event === "Stop" && event.message?.trim()) {
       lastStopMessage.current[oracleName] = event.message.trim();
     }
 
     if (event.event === "Notification") {
-      const msg = event.message.toLowerCase();
+      const msg = (event.message ?? "").toLowerCase();
       let askType: AskType | null = null;
       if (msg.includes("waiting for your input") || msg.includes("waiting for input")) askType = "input";
       else if (msg.includes("needs your attention") || msg.includes("attention")) askType = "attention";
@@ -168,7 +168,7 @@ export function useSessions() {
         if (!stopMsg) {
           for (let i = feedEventsRef.current.length - 1; i >= 0; i--) {
             const fe = feedEventsRef.current[i];
-            if (fe.oracle === event.oracle && fe.event === "Stop" && fe.message.trim()) {
+            if (fe.oracle === event.oracle && fe.event === "Stop" && fe.message?.trim()) {
               stopMsg = fe.message.trim();
               break;
             }
