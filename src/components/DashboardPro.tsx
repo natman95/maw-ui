@@ -28,11 +28,15 @@ interface FedStatus {
 
 interface Plugin {
   name: string;
-  type: string;
-  source: string;
-  events: number;
-  errors: number;
-  lastEvent: string;
+  // Old v2 runtime shape (pre-alpha.x)
+  type?: string;
+  source?: string;
+  events?: number;
+  errors?: number;
+  lastEvent?: string;
+  // New catalog shape (alpha.x+)
+  version?: string;
+  api?: { path: string; methods: string[] };
 }
 
 interface PluginStatus {
@@ -199,7 +203,7 @@ function AgentGridPanel({ sessions, onRefresh }: { sessions: Session[]; onRefres
           s.windows.map((w) =>
             READONLY ? (
               <span
-                key={`${s.name}-${w.name}`}
+                key={`${s.name}-${w.name}-${w.repo ?? ""}`}
                 className="px-1.5 py-0.5 rounded text-[10px] font-mono"
                 style={{
                   backgroundColor: w.active ? "rgba(34,197,94,0.15)" : "rgba(255,255,255,0.05)",
@@ -210,7 +214,7 @@ function AgentGridPanel({ sessions, onRefresh }: { sessions: Session[]; onRefres
               </span>
             ) : (
               <button
-                key={`${s.name}-${w.name}`}
+                key={`${s.name}-${w.name}-${w.repo ?? ""}`}
                 className="px-1.5 py-0.5 rounded text-[10px] font-mono cursor-pointer hover:ring-1 hover:ring-white/20 transition-all"
                 style={{
                   backgroundColor: w.active ? "rgba(34,197,94,0.15)" : "rgba(255,255,255,0.05)",
@@ -230,29 +234,37 @@ function AgentGridPanel({ sessions, onRefresh }: { sessions: Session[]; onRefres
   );
 }
 
-function PluginPanel({ plugins }: { plugins: PluginStatus | null }) {
+function PluginPanel({ plugins }: { plugins: PluginStatus | Plugin[] | null }) {
   if (!plugins) return <PanelShell title="Plugins" subtitle="loading..." />;
-  const totalEvents = plugins.plugins.reduce((n, p) => n + p.events, 0);
-  const totalErrors = plugins.plugins.reduce((n, p) => n + p.errors, 0);
+  // /api/plugins shape drifted in maw-js alpha.x: used to return {plugins:[{events,errors}]},
+  // now returns flat [{name,version,api}] catalog. Handle both.
+  const list = Array.isArray(plugins) ? plugins : plugins.plugins ?? [];
+  const hasRuntimeStats = list.length > 0 && typeof list[0].events === "number";
+  const totalEvents = hasRuntimeStats ? list.reduce((n, p) => n + (p.events ?? 0), 0) : 0;
+  const totalErrors = hasRuntimeStats ? list.reduce((n, p) => n + (p.errors ?? 0), 0) : 0;
   return (
     <PanelShell
       title="Plugins"
-      subtitle={`${plugins.plugins.length} loaded · ${totalEvents} events${totalErrors > 0 ? ` · ${totalErrors} errors` : ""}`}
+      subtitle={hasRuntimeStats
+        ? `${list.length} loaded · ${totalEvents} events${totalErrors > 0 ? ` · ${totalErrors} errors` : ""}`
+        : `${list.length} loaded`}
     >
       <div className="space-y-1">
-        {plugins.plugins.map((p) => (
+        {list.map((p: any) => (
           <div key={p.name} className="flex items-center justify-between text-xs">
             <div className="flex items-center gap-2">
               <span
                 className="w-1.5 h-1.5 rounded-full"
-                style={{ backgroundColor: p.errors > 0 ? "#ef4444" : "#22c55e" }}
+                style={{ backgroundColor: (p.errors ?? 0) > 0 ? "#ef4444" : "#22c55e" }}
               />
               <span className="text-white/60">{p.name.replace(/\.ts$/, "")}</span>
-              <span className="text-white/20 text-[10px]">{p.source}</span>
+              <span className="text-white/20 text-[10px]">{p.source ?? p.version ?? ""}</span>
             </div>
-            <span className="text-white/40 font-mono text-[10px]">
-              {p.events}ev{p.errors > 0 && <span className="text-red-400 ml-1">{p.errors}err</span>}
-            </span>
+            {hasRuntimeStats && (
+              <span className="text-white/40 font-mono text-[10px]">
+                {p.events}ev{p.errors > 0 && <span className="text-red-400 ml-1">{p.errors}err</span>}
+              </span>
+            )}
           </div>
         ))}
       </div>
