@@ -195,27 +195,91 @@ function StatusOverview({ agents, feedActive, agentFeedLog, onSelectAgent, send 
 }
 
 // ─── Token Tracking Panel ───────────────────────────────────────────
+// Data source: /api/costs (replaced deprecated /api/tokens + /api/tokens/rate).
+// Burn rate is derived client-side from the delta in cumulative totals
+// between polls — the backend no longer exposes a windowed rate endpoint.
+interface CostsAgent {
+  name: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+  totalTokens: number;
+  sessions: number;
+  turns: number;
+  lastActive?: string;
+}
+interface CostsResponse {
+  agents: CostsAgent[];
+  total: { tokens: number; cost: number; sessions: number; agents: number };
+}
+
 function TokenTracking() {
   const [sessions, setSessions] = useState<TokenSession[]>([]);
   const [rate, setRate] = useState<TokenRate | null>(null);
   const [loading, setLoading] = useState(true);
+  const prevRef = useRef<{ total: number; input: number; output: number; turns: number; ts: number } | null>(null);
 
-  const fetchTokens = useCallback(() => {
-    Promise.all([
-      fetch(apiUrl("/api/tokens")).then(r => r.ok ? r.json() : []),
-      fetch(apiUrl("/api/tokens/rate?mode=window&window=3600")).then(r => r.ok ? r.json() : null),
-    ]).then(([tokData, rateData]) => {
-      setSessions(Array.isArray(tokData) ? tokData : tokData?.sessions || []);
-      setRate(rateData);
+  const fetchTokens = useCallback(async () => {
+    try {
+      const res = await fetch(apiUrl("/api/costs"));
+      if (!res.ok) { setLoading(false); return; }
+      const data = await res.json() as CostsResponse;
+      const agents = Array.isArray(data.agents) ? data.agents : [];
+
+      setSessions(agents.map((a) => ({
+        session: a.name,
+        project: a.name,
+        input: a.inputTokens,
+        output: a.outputTokens,
+        cache: (a.cacheReadTokens ?? 0) + (a.cacheCreateTokens ?? 0),
+        total: a.totalTokens,
+        turns: a.turns,
+        date: a.lastActive ?? "",
+      })));
+
+      const now = Date.now();
+      const totalTokens = data.total?.tokens ?? agents.reduce((s, a) => s + a.totalTokens, 0);
+      const totalInput = agents.reduce((s, a) => s + a.inputTokens, 0);
+      const totalOutput = agents.reduce((s, a) => s + a.outputTokens, 0);
+      const totalTurns = agents.reduce((s, a) => s + a.turns, 0);
+
+      const prev = prevRef.current;
+      // Require ≥6s of delta to keep rate stable and avoid divide-by-near-zero.
+      if (prev && now - prev.ts >= 6_000) {
+        const dtMin = (now - prev.ts) / 60_000;
+        const dTotal = Math.max(0, totalTokens - prev.total);
+        const dInput = Math.max(0, totalInput - prev.input);
+        const dOutput = Math.max(0, totalOutput - prev.output);
+        const dTurns = Math.max(0, totalTurns - prev.turns);
+        setRate({
+          inputTokens: dInput,
+          outputTokens: dOutput,
+          totalTokens: dTotal,
+          inputPerMin: Math.round(dInput / dtMin),
+          outputPerMin: Math.round(dOutput / dtMin),
+          totalPerMin: Math.round(dTotal / dtMin),
+          turns: Math.round((dTurns / dtMin) * 60),
+        });
+      }
+      prevRef.current = { total: totalTokens, input: totalInput, output: totalOutput, turns: totalTurns, ts: now };
       setLoading(false);
-    }).catch(() => setLoading(false));
+    } catch {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => { fetchTokens(); }, [fetchTokens]);
 
-  // Real-time: refetch on feed events via WebSocket (replaces 30s polling)
+  // Periodic poll drives burn-rate calc (needs predictable Δt between samples).
   const fetchRef = useRef(fetchTokens);
   fetchRef.current = fetchTokens;
+  useEffect(() => {
+    const id = setInterval(() => fetchRef.current(), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Also refetch on feed events so totals track near real-time.
   const handleWs = useCallback((msg: any) => {
     if (msg.type === "feed") fetchRef.current();
   }, []);
