@@ -43,7 +43,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceUnsupported, setVoiceUnsupported] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [attachments, setAttachments] = useState<{ id: string; file: File; url: string }[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [shotBusy, setShotBusy] = useState(false);
   const recognitionRef = useRef<any>(null);
@@ -180,18 +180,25 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     }
   }, [selectedTarget, inputBuf, queueSend, selectWindow, sessions]);
 
-  // Mobile send (real input element submits buffer)
+  // Mobile send — combines uploaded image paths (one per line) + text into a single send-buffer flush
   const sendMobile = useCallback(() => {
     if (!selectedTarget) return;
-    const text = inputBuf;
-    if (!text && attachments.length === 0) return;
-    if (text) queueSend(text);
-    if (attachments.length > 0) {
-      // Phase 2: upload + prepend paths. For now just clear + toast.
-      showToast(`📎 ${attachments.length} ภาพ — รอ Phase 2 (upload API)`);
-      attachments.forEach(a => URL.revokeObjectURL(a.url));
-      setAttachments([]);
+    if (!inputBuf && attachments.length === 0) return;
+    if (attachments.some(a => a.status === "uploading")) {
+      showToast("⏳ กำลังอัปโหลด — รอแป๊บ");
+      return;
     }
+    if (attachments.some(a => a.status === "error")) {
+      showToast("❌ มีไฟล์อัปโหลดไม่สำเร็จ — ลบก่อนส่ง");
+      return;
+    }
+    const paths = attachments.map(a => a.path).filter((p): p is string => !!p);
+    const composed = paths.length > 0
+      ? paths.join("\n") + (inputBuf ? "\n" + inputBuf : "")
+      : inputBuf;
+    if (composed) queueSend(composed);
+    attachments.forEach(a => URL.revokeObjectURL(a.blobUrl));
+    setAttachments([]);
     setInputBuf("");
   }, [selectedTarget, inputBuf, attachments, queueSend, showToast]);
 
@@ -234,23 +241,47 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     rec.start();
   }, [voiceActive, showToast]);
 
-  // File picker handler (Phase 1 stub — preview only, send gated to Phase 2)
+  // File picker handler — validates client-side, spawns instant preview via blob URL,
+  // then fires background POST /api/upload per file (multipart; field "file"). On success swaps
+  // to server URL and stores `path` for prepend-on-send. Phase 2 wiring.
   const handleFiles = useCallback((files: FileList | null) => {
     if (!files) return;
-    const next: { id: string; file: File; url: string }[] = [];
+    const ALLOWED = /^image\/(png|jpeg|jpg|webp|heic|heif)$/i;
+    const next: Attachment[] = [];
     for (const f of Array.from(files)) {
-      if (!f.type.startsWith("image/")) { showToast(`ข้าม ${f.name} (ไม่ใช่รูป)`); continue; }
+      if (!ALLOWED.test(f.type)) { showToast(`ข้าม ${f.name} (ต้อง PNG/JPG/WebP/HEIC)`); continue; }
       if (f.size > 10 * 1024 * 1024) { showToast(`${f.name} ใหญ่เกิน 10MB`); continue; }
       const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      next.push({ id, file: f, url: URL.createObjectURL(f) });
+      next.push({ id, file: f, blobUrl: URL.createObjectURL(f), status: "uploading" });
     }
+    if (next.length === 0) return;
     setAttachments(prev => [...prev, ...next]);
+    next.forEach(att => {
+      const fd = new FormData();
+      fd.append("file", att.file);
+      fetch("/api/upload", { method: "POST", body: fd })
+        .then(async r => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json() as Promise<{ id: string; url: string; path: string }>;
+        })
+        .then(json => {
+          setAttachments(prev => prev.map(x =>
+            x.id === att.id ? { ...x, status: "done", path: json.path, serverUrl: json.url } : x
+          ));
+        })
+        .catch(err => {
+          setAttachments(prev => prev.map(x =>
+            x.id === att.id ? { ...x, status: "error", error: String(err?.message || "upload failed").slice(0, 40) } : x
+          ));
+          showToast(`อัปโหลดล้มเหลว: ${att.file.name.slice(0, 18)}`);
+        });
+    });
   }, [showToast]);
 
   const removeAttachment = useCallback((id: string) => {
     setAttachments(prev => {
       const a = prev.find(x => x.id === id);
-      if (a) URL.revokeObjectURL(a.url);
+      if (a) URL.revokeObjectURL(a.blobUrl);
       return prev.filter(x => x.id !== id);
     });
   }, []);
@@ -597,25 +628,53 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
         </div>
       </div>
 
-      {/* Image attach strip */}
+      {/* Image attach strip — blob preview swaps to server URL post-upload; status overlay shows progress/error */}
       {attachments.length > 0 && (
         <div className="flex-shrink-0 border-t border-white/5 px-2 py-2" style={{ background: "#0d0d14" }}>
           <div className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
-            {attachments.map(a => (
-              <div key={a.id} className="relative flex-shrink-0">
-                <img src={a.url} alt={a.file.name} className="w-16 h-16 rounded-lg object-cover border border-purple-500/40" />
-                <button
-                  onClick={() => removeAttachment(a.id)}
-                  className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center shadow active:scale-90"
-                  aria-label="Remove attachment"
-                >
-                  ✕
-                </button>
-                <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-[9px] text-white text-center py-0.5 rounded-b-lg font-mono truncate px-1">
-                  {a.file.name.slice(0, 12)}
+            {attachments.map(a => {
+              const borderColor =
+                a.status === "error" ? "rgba(248, 113, 113, 0.7)" :
+                a.status === "done" ? "rgba(74, 222, 128, 0.55)" :
+                "rgba(168, 85, 247, 0.4)";
+              return (
+                <div key={a.id} className="relative flex-shrink-0">
+                  <img
+                    src={a.serverUrl ?? a.blobUrl}
+                    alt={a.file.name}
+                    className="w-16 h-16 rounded-lg object-cover"
+                    style={{ border: `1px solid ${borderColor}` }}
+                  />
+                  {a.status === "uploading" && (
+                    <div
+                      className="absolute inset-0 rounded-lg flex items-center justify-center text-[10px] font-mono text-white"
+                      style={{ background: "rgba(0,0,0,0.55)", animation: "blink 1s infinite" }}
+                    >
+                      ⤴
+                    </div>
+                  )}
+                  {a.status === "error" && (
+                    <div
+                      className="absolute inset-0 rounded-lg flex items-center justify-center text-[14px]"
+                      style={{ background: "rgba(127, 29, 29, 0.7)" }}
+                      title={a.error}
+                    >
+                      ⚠
+                    </div>
+                  )}
+                  <button
+                    onClick={() => removeAttachment(a.id)}
+                    className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center shadow active:scale-90"
+                    aria-label="Remove attachment"
+                  >
+                    ✕
+                  </button>
+                  <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-[9px] text-white text-center py-0.5 rounded-b-lg font-mono truncate px-1">
+                    {a.file.name.slice(0, 12)}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -633,7 +692,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
           <input
             id="mobile-file-picker"
             type="file"
-            accept="image/png,image/jpeg,image/webp,image/heic"
+            accept="image/png,image/jpeg,image/webp,image/heic,image/heif"
             multiple
             className="hidden"
             onChange={e => { handleFiles(e.target.files); e.target.value = ""; }}
@@ -792,6 +851,16 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     </div>
   );
 });
+
+interface Attachment {
+  id: string;
+  file: File;
+  blobUrl: string;
+  path?: string;
+  serverUrl?: string;
+  status: "uploading" | "done" | "error";
+  error?: string;
+}
 
 interface AssistKeyProps {
   label: string;
