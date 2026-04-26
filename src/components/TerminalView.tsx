@@ -461,7 +461,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); document.getElementById("desktop-file-picker")?.click(); }}
-              className="ml-auto w-7 h-7 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/5"
+              className="w-7 h-7 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/5"
               aria-label="Attach image"
               title="Attach image"
             >
