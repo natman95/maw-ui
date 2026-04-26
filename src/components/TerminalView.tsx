@@ -90,6 +90,16 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     if (!isMobile) termRef.current?.focus();
   }, [isMobile]);
 
+  // Mobile: auto-select first window on first load so input box is enabled
+  // (desktop sidebar always visible — user clicks; mobile must tap ☰ otherwise)
+  useEffect(() => {
+    if (!isMobile) return;
+    if (selectedTarget) return;
+    if (sessions.length === 0) return;
+    const first = sessions[0]?.windows[0];
+    if (first) selectWindow(`${sessions[0].name}:${first.index}`);
+  }, [isMobile, selectedTarget, sessions, selectWindow]);
+
   // Flush send queue
   useEffect(() => {
     if (sendingRef.current || sendQueue.length === 0) return;
