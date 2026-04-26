@@ -1,4 +1,4 @@
-import { memo, useState, useEffect, useRef, useCallback } from "react";
+import { memo, useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { ansiToHtml } from "../lib/ansi";
 import { roomStyle } from "../lib/constants";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -39,6 +39,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
   // Mobile-only UI state
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [copyMode, setCopyMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [scrollAtBottom, setScrollAtBottom] = useState(true);
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceUnsupported, setVoiceUnsupported] = useState(false);
@@ -379,6 +380,20 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     }
   }, [handleFiles, showToast]);
 
+  // Copy-mode regex highlight — wraps matches in <mark>; only touches text segments,
+  // not HTML tags (split on /<[^>]*>/ keeps ansiToHtml's spans intact). Invalid regex
+  // → fall through to plain captureHtml. Bound to copyMode so default render path is untouched.
+  const displayHtml = useMemo(() => {
+    const q = searchQuery.trim();
+    if (!copyMode || !q || !captureHtml) return captureHtml;
+    let re: RegExp;
+    try { re = new RegExp(q, "gi"); } catch { return captureHtml; }
+    return captureHtml.split(/(<[^>]*>)/).map(p => {
+      if (!p || p.startsWith("<")) return p;
+      return p.replace(re, m => m ? `<mark style="background:#fbbf24;color:#000;padding:0 2px;border-radius:2px">${m}</mark>` : m);
+    }).join("");
+  }, [captureHtml, copyMode, searchQuery]);
+
   // Get display name for selected target
   const selectedName = selectedTarget
     ? sessions.flatMap(s => s.windows.map(w => ({ target: `${s.name}:${w.index}`, name: w.name }))).find(w => w.target === selectedTarget)?.name || ""
@@ -536,20 +551,41 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
         </button>
       </header>
 
-      {/* Copy-mode bar */}
+      {/* Copy-mode bar — search input + actions */}
       {copyMode && (
-        <div className="flex-shrink-0 flex items-center gap-2 px-3 py-1.5 text-[11px] border-b border-amber-500/30" style={{ background: "rgba(146, 64, 14, 0.3)" }}>
-          <span className="font-mono text-amber-300">📋 COPY MODE</span>
+        <div className="flex-shrink-0 flex items-center gap-1.5 px-2 py-1.5 text-[11px] border-b border-amber-500/30" style={{ background: "rgba(146, 64, 14, 0.3)" }}>
+          <span className="font-mono text-amber-300 text-[13px] flex-shrink-0">/</span>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="regex search..."
+            autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            className="flex-1 min-w-0 bg-black/30 border border-amber-500/40 rounded px-2 py-0.5 font-mono text-amber-100 text-[11px] placeholder-amber-700 focus:outline-none focus:border-amber-400"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery("")}
+              className="px-1.5 py-0.5 rounded text-amber-200 active:bg-amber-700/50 flex-shrink-0"
+              style={{ background: "rgba(146, 64, 14, 0.4)" }}
+              aria-label="Clear search"
+            >
+              ✕
+            </button>
+          )}
           <button
             onClick={() => {
               const sel = window.getSelection()?.toString() || "";
               if (!sel) { showToast("ยังไม่ได้เลือก — long-press text ก่อน"); return; }
               navigator.clipboard.writeText(sel).then(() => showToast(`✓ คัดลอกแล้ว ${sel.length} ตัวอักษร`));
             }}
-            className="px-2 py-0.5 rounded text-emerald-200 active:bg-emerald-700/60"
+            className="px-2 py-0.5 rounded text-emerald-200 active:bg-emerald-700/60 flex-shrink-0"
             style={{ background: "rgba(4, 120, 87, 0.4)" }}
           >
-            ✓ copy
+            ✓
           </button>
           <button
             onClick={() => {
@@ -561,14 +597,14 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
                 showToast("↑ jumped to prompt");
               }
             }}
-            className="px-2 py-0.5 rounded text-amber-200 active:bg-amber-700/50"
+            className="px-2 py-0.5 rounded text-amber-200 active:bg-amber-700/50 flex-shrink-0"
             style={{ background: "rgba(146, 64, 14, 0.4)" }}
           >
-            ↑ prev $
+            ↑$
           </button>
           <button
-            onClick={() => setCopyMode(false)}
-            className="ml-auto px-2 py-0.5 rounded text-gray-300 active:bg-gray-700"
+            onClick={() => { setCopyMode(false); setSearchQuery(""); }}
+            className="px-2 py-0.5 rounded text-gray-300 active:bg-gray-700 flex-shrink-0"
             style={{ background: "#1f2937" }}
           >
             esc
@@ -591,7 +627,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
         }}
       >
         {captureHtml ? (
-          <div dangerouslySetInnerHTML={{ __html: captureHtml }} />
+          <div dangerouslySetInnerHTML={{ __html: displayHtml }} />
         ) : (
           <div className="text-white/15 text-center mt-[30vh] text-sm">
             {selectedTarget ? "connecting..." : "tap ☰ to select a window"}
