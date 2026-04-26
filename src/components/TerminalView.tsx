@@ -510,7 +510,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
 
   return (
     <div
-      className="flex flex-col fixed inset-0"
+      className="flex flex-col fixed inset-0 z-30"
       style={{ background: "#0a0a0f", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       {/* Header */}
