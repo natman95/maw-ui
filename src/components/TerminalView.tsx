@@ -133,6 +133,29 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     if (text) setInputBuf(b => b + text);
   }, []);
 
+  // Send — combines uploaded image paths (one per line) + text into a single send-buffer flush.
+  // Used by both mobile send button and desktop Enter handler.
+  const send = useCallback(() => {
+    if (!selectedTarget) return;
+    if (!inputBuf && attachments.length === 0) return;
+    if (attachments.some(a => a.status === "uploading")) {
+      showToast("⏳ กำลังอัปโหลด — รอแป๊บ");
+      return;
+    }
+    if (attachments.some(a => a.status === "error")) {
+      showToast("❌ มีไฟล์อัปโหลดไม่สำเร็จ — ลบก่อนส่ง");
+      return;
+    }
+    const paths = attachments.map(a => a.path).filter((p): p is string => !!p);
+    const composed = paths.length > 0
+      ? paths.join("\n") + (inputBuf ? "\n" + inputBuf : "")
+      : inputBuf;
+    if (composed) queueSend(composed);
+    attachments.forEach(a => URL.revokeObjectURL(a.blobUrl));
+    setAttachments([]);
+    setInputBuf("");
+  }, [selectedTarget, inputBuf, attachments, queueSend, showToast]);
+
   // Desktop keyboard handler (preserved)
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
@@ -154,7 +177,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
       if (e.shiftKey) {
         setInputBuf(b => b + "\n");
       } else {
-        if (inputBuf) { queueSend(inputBuf); setInputBuf(""); }
+        send();
       }
     } else if (e.key === "Backspace") {
       e.preventDefault();
@@ -179,29 +202,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
       e.preventDefault();
       setInputBuf(b => b + e.key);
     }
-  }, [selectedTarget, inputBuf, queueSend, selectWindow, sessions]);
-
-  // Mobile send — combines uploaded image paths (one per line) + text into a single send-buffer flush
-  const sendMobile = useCallback(() => {
-    if (!selectedTarget) return;
-    if (!inputBuf && attachments.length === 0) return;
-    if (attachments.some(a => a.status === "uploading")) {
-      showToast("⏳ กำลังอัปโหลด — รอแป๊บ");
-      return;
-    }
-    if (attachments.some(a => a.status === "error")) {
-      showToast("❌ มีไฟล์อัปโหลดไม่สำเร็จ — ลบก่อนส่ง");
-      return;
-    }
-    const paths = attachments.map(a => a.path).filter((p): p is string => !!p);
-    const composed = paths.length > 0
-      ? paths.join("\n") + (inputBuf ? "\n" + inputBuf : "")
-      : inputBuf;
-    if (composed) queueSend(composed);
-    attachments.forEach(a => URL.revokeObjectURL(a.blobUrl));
-    setAttachments([]);
-    setInputBuf("");
-  }, [selectedTarget, inputBuf, attachments, queueSend, showToast]);
+  }, [selectedTarget, inputBuf, queueSend, selectWindow, sessions, send]);
 
   // Mobile scroll-stick tracking
   useEffect(() => {
@@ -287,9 +288,8 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     });
   }, []);
 
-  // Window-level drag-drop (mobile + desktop browsers — only renders overlay on mobile)
+  // Window-level drag-drop (mobile + desktop browsers)
   useEffect(() => {
-    if (!isMobile) return;
     const onEnter = (e: DragEvent) => {
       if (!e.dataTransfer?.types.includes("Files")) return;
       e.preventDefault();
@@ -322,7 +322,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
       window.removeEventListener("dragleave", onLeave);
       window.removeEventListener("drop", onDrop);
     };
-  }, [isMobile, handleFiles]);
+  }, [handleFiles]);
 
   // Screenshot terminal output via dynamic-imported html2canvas (kept out of initial bundle)
   const captureScreenshot = useCallback(async () => {
@@ -399,9 +399,10 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     ? sessions.flatMap(s => s.windows.map(w => ({ target: `${s.name}:${w.index}`, name: w.name }))).find(w => w.target === selectedTarget)?.name || ""
     : "";
 
-  // ─── DESKTOP LAYOUT (unchanged) ───────────────────────────────────
+  // ─── DESKTOP LAYOUT ───────────────────────────────────────────────
   if (!isMobile) {
     return (
+      <>
       <div className="flex mx-4 sm:mx-6 mb-3 rounded-2xl overflow-hidden border border-white/[0.06]" style={{ height: "calc(100vh - 72px)" }}>
         {/* Sidebar */}
         <div className="w-[220px] flex-shrink-0 flex flex-col border-r border-white/[0.06] overflow-y-auto" style={{ background: "#08080e" }}>
@@ -457,7 +458,35 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
           <div className="flex items-center gap-3 px-4 py-2 border-b border-white/[0.06] flex-shrink-0" style={{ background: "#0a0a12" }}>
             <span className="text-xs font-mono text-white/40">{selectedName || "select a window"}</span>
             {selectedTarget && <span className="text-[10px] font-mono text-white/20">{selectedTarget}</span>}
-            <span className="ml-auto text-[10px] font-mono" style={{ color: connected ? "#4caf50" : "#ef5350" }}>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); document.getElementById("desktop-file-picker")?.click(); }}
+              className="ml-auto w-7 h-7 rounded flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/5"
+              aria-label="Attach image"
+              title="Attach image"
+            >
+              <span className="text-sm">📎</span>
+            </button>
+            <input
+              id="desktop-file-picker"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/heic,image/heif"
+              multiple
+              className="hidden"
+              onChange={e => { handleFiles(e.target.files); e.target.value = ""; }}
+            />
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); toggleVoice(); }}
+              disabled={voiceUnsupported}
+              className={`w-7 h-7 rounded flex items-center justify-center hover:bg-white/5 ${voiceActive ? "bg-red-500/30 text-red-300" : "text-gray-400 hover:text-white"} disabled:opacity-40`}
+              style={voiceActive ? { animation: "blink 1s infinite" } : undefined}
+              aria-label="Voice input"
+              title="Voice input (Thai)"
+            >
+              <span className="text-sm">🎤</span>
+            </button>
+            <span className="text-[10px] font-mono" style={{ color: connected ? "#4caf50" : "#ef5350" }}>
               {connected ? "live" : "reconnecting"}
             </span>
           </div>
@@ -476,6 +505,58 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
               </div>
             )}
           </div>
+
+          {/* Image attach strip — desktop (mirrors mobile) */}
+          {attachments.length > 0 && (
+            <div className="flex-shrink-0 border-t border-white/[0.06] px-3 py-2" style={{ background: "#0d0d14" }}>
+              <div className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                {attachments.map(a => {
+                  const borderColor =
+                    a.status === "error" ? "rgba(248, 113, 113, 0.7)" :
+                    a.status === "done" ? "rgba(74, 222, 128, 0.55)" :
+                    "rgba(168, 85, 247, 0.4)";
+                  return (
+                    <div key={a.id} className="relative flex-shrink-0">
+                      <img
+                        src={a.serverUrl ?? a.blobUrl}
+                        alt={a.file.name}
+                        className="w-16 h-16 rounded-lg object-cover"
+                        style={{ border: `1px solid ${borderColor}` }}
+                      />
+                      {a.status === "uploading" && (
+                        <div
+                          className="absolute inset-0 rounded-lg flex items-center justify-center text-[10px] font-mono text-white"
+                          style={{ background: "rgba(0,0,0,0.55)", animation: "blink 1s infinite" }}
+                        >
+                          ⤴
+                        </div>
+                      )}
+                      {a.status === "error" && (
+                        <div
+                          className="absolute inset-0 rounded-lg flex items-center justify-center text-[14px]"
+                          style={{ background: "rgba(127, 29, 29, 0.7)" }}
+                          title={a.error}
+                        >
+                          ⚠
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); removeAttachment(a.id); }}
+                        className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center shadow hover:scale-110"
+                        aria-label="Remove attachment"
+                      >
+                        ✕
+                      </button>
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-[9px] text-white text-center py-0.5 rounded-b-lg font-mono truncate px-1">
+                        {a.file.name.slice(0, 12)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Input line */}
           <div
@@ -502,6 +583,30 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
           </div>
         </div>
       </div>
+      {/* Drag-drop overlay (desktop) */}
+      {dragOver && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center pointer-events-none"
+          style={{
+            background: "rgba(88, 28, 135, 0.78)",
+            border: "3px dashed rgba(216, 180, 254, 0.8)",
+          }}
+        >
+          <div className="text-3xl mb-3">📥</div>
+          <div className="text-white text-base font-semibold mb-1">ปล่อยรูปที่นี่</div>
+          <div className="text-purple-200 text-[11px] font-mono">PNG · JPG · WebP · max 10MB</div>
+        </div>
+      )}
+      {/* Toast (desktop) */}
+      {toast && (
+        <div
+          className="fixed top-16 left-1/2 -translate-x-1/2 px-4 py-2.5 text-sm shadow-2xl z-50 font-mono rounded-xl"
+          style={{ background: "#111827", border: "1px solid rgba(168, 85, 247, 0.4)", color: "#e5e7eb" }}
+        >
+          {toast}
+        </div>
+      )}
+      </>
     );
   }
 
@@ -742,7 +847,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
             onKeyDown={e => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                sendMobile();
+                send();
               }
             }}
             placeholder={selectedTarget ? "พิมพ์ หรือลากรูปลงมา..." : "เลือก window ก่อน"}
@@ -770,7 +875,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
             📥
           </button>
           <button
-            onClick={sendMobile}
+            onClick={send}
             disabled={!selectedTarget || (!inputBuf && attachments.length === 0)}
             className="w-9 h-9 rounded-lg text-white flex items-center justify-center active:scale-95 shadow-lg flex-shrink-0 disabled:opacity-40"
             style={{ background: "linear-gradient(135deg, #a855f7 0%, #ec4899 100%)" }}
