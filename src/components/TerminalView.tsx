@@ -44,8 +44,11 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
   const [voiceUnsupported, setVoiceUnsupported] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<{ id: string; file: File; url: string }[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const [shotBusy, setShotBusy] = useState(false);
   const recognitionRef = useRef<any>(null);
   const inputElRef = useRef<HTMLInputElement>(null);
+  const dragDepthRef = useRef(0);
 
   // Shared WebSocket with reconnection for capture stream
   const handleCapture = useCallback((data: any) => {
@@ -242,6 +245,76 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     });
   }, []);
 
+  // Window-level drag-drop (mobile + desktop browsers — only renders overlay on mobile)
+  useEffect(() => {
+    if (!isMobile) return;
+    const onEnter = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes("Files")) return;
+      e.preventDefault();
+      dragDepthRef.current += 1;
+      setDragOver(true);
+    };
+    const onOver = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes("Files")) return;
+      e.preventDefault();
+    };
+    const onLeave = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes("Files")) return;
+      e.preventDefault();
+      dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+      if (dragDepthRef.current === 0) setDragOver(false);
+    };
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+      dragDepthRef.current = 0;
+      setDragOver(false);
+      if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
+    };
+    window.addEventListener("dragenter", onEnter);
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("dragleave", onLeave);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragenter", onEnter);
+      window.removeEventListener("dragover", onOver);
+      window.removeEventListener("dragleave", onLeave);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, [isMobile, handleFiles]);
+
+  // Screenshot terminal output via dynamic-imported html2canvas (kept out of initial bundle)
+  const captureScreenshot = useCallback(async () => {
+    const out = outputRef.current;
+    if (!out || shotBusy) return;
+    setShotBusy(true);
+    try {
+      const { default: html2canvas } = await import("html2canvas");
+      const canvas = await html2canvas(out, {
+        backgroundColor: "#0a0a0f",
+        scale: window.devicePixelRatio || 2,
+        logging: false,
+        useCORS: true,
+      });
+      canvas.toBlob(blob => {
+        if (!blob) { showToast("📸 capture failed"); return; }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        a.href = url;
+        a.download = `terminal-${selectedTarget || "snap"}-${stamp}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast("📸 บันทึกแล้ว");
+      }, "image/png");
+    } catch (err: any) {
+      showToast(`📸 error: ${err?.message?.slice(0, 40) || "unknown"}`);
+    } finally {
+      setShotBusy(false);
+    }
+  }, [selectedTarget, shotBusy, showToast]);
+
   // Smart paste — tries clipboard image, falls back to text
   const smartPaste = useCallback(async () => {
     if (!navigator.clipboard) { showToast("clipboard ไม่พร้อมใช้"); return; }
@@ -410,6 +483,15 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
           aria-label="Toggle copy mode"
         >
           <span className="text-base">📋</span>
+        </button>
+        <button
+          onClick={captureScreenshot}
+          disabled={shotBusy || !selectedTarget}
+          className="w-9 h-9 rounded-lg flex items-center justify-center text-gray-300 active:bg-gray-800 disabled:opacity-40"
+          style={shotBusy ? { animation: "blink 1s infinite" } : undefined}
+          aria-label="Screenshot terminal"
+        >
+          <span className="text-base">📸</span>
         </button>
       </header>
 
@@ -672,6 +754,21 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
           {totalWindows} windows · {sessions.length} sessions
         </div>
       </aside>
+
+      {/* Drag-drop overlay */}
+      {dragOver && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center pointer-events-none"
+          style={{
+            background: "rgba(88, 28, 135, 0.78)",
+            border: "3px dashed rgba(216, 180, 254, 0.8)",
+          }}
+        >
+          <div className="text-3xl mb-3">📥</div>
+          <div className="text-white text-base font-semibold mb-1">ปล่อยรูปที่นี่</div>
+          <div className="text-purple-200 text-[11px] font-mono">PNG · JPG · WebP · max 10MB</div>
+        </div>
+      )}
 
       {/* Toast */}
       {toast && (
