@@ -2,7 +2,6 @@ import { memo, useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { ansiToHtml } from "../lib/ansi";
 import { roomStyle } from "../lib/constants";
 import { useWebSocket } from "../hooks/useWebSocket";
-import { useIsMobile } from "../hooks/useMediaQuery";
 import type { Session, AgentState } from "../lib/types";
 
 interface TerminalViewProps {
@@ -25,7 +24,30 @@ const KEY_SEQUENCES: Record<string, string> = {
 };
 
 export const TerminalView = memo(function TerminalView({ sessions, agents, connected, onSelectAgent }: TerminalViewProps) {
-  const isMobile = useIsMobile();
+  // Container-aware narrow check (replaces window-level useIsMobile). Boss
+  // 2026-04-27 23:01: /maw/#terminal rendered mobile layout on Chrome desktop.
+  // Window matchMedia returns false at desktop widths, but the actual
+  // TerminalView container can still be < 768px (Layout wrappers, panes,
+  // future iframe embeds). Measure the rendered container, fall back to
+  // viewport width on first paint before observer fires.
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1024
+  );
+  const setContainerRef = useCallback((el: HTMLDivElement | null) => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const w = entry.contentRect.width;
+      setContainerWidth(w > 0 ? w : window.innerWidth);
+    });
+    ro.observe(el);
+    observerRef.current = ro;
+  }, []);
+  useEffect(() => () => observerRef.current?.disconnect(), []);
+  const isMobile = containerWidth < 768;
+
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
   const [captureHtml, setCaptureHtml] = useState("");
   const [inputBuf, setInputBuf] = useState("");
@@ -407,7 +429,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
   if (!isMobile) {
     return (
       <>
-      <div className="flex mx-4 sm:mx-6 mb-3 rounded-2xl overflow-hidden border border-white/[0.06]" style={{ height: "calc(100vh - 72px)" }}>
+      <div ref={setContainerRef} className="flex mx-4 sm:mx-6 mb-3 rounded-2xl overflow-hidden border border-white/[0.06]" style={{ height: "calc(100vh - 72px)" }}>
         {/* Sidebar */}
         <div className="w-[220px] flex-shrink-0 flex flex-col border-r border-white/[0.06] overflow-y-auto" style={{ background: "#08080e" }}>
           {sessions.map(session => {
@@ -625,6 +647,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
 
   return (
     <div
+      ref={setContainerRef}
       className="flex flex-col fixed inset-0 z-30"
       style={{ background: "#0a0a0f", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}
     >
