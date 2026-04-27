@@ -56,7 +56,11 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     if (data.type === "capture") {
       const out = outputRef.current;
       const atBottom = out ? out.scrollHeight - out.scrollTop - out.clientHeight < 60 : true;
-      setCaptureHtml(ansiToHtml(data.content || "(empty)"));
+      // Trim trailing blank rows so the prompt sits next to the input row instead of floating
+      // mid-pane. tmux capture-pane preserves empty rows up to the configured pane height.
+      const raw = (data.content || "(empty)") as string;
+      const trimmed = raw.replace(/[\s\n]+$/, "");
+      setCaptureHtml(ansiToHtml(trimmed));
       if (atBottom) requestAnimationFrame(() => out?.scrollTo(0, out.scrollHeight));
     }
   }, []);
@@ -491,16 +495,22 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
             </span>
           </div>
 
-          {/* Output */}
+          {/* Output — bottom-aligned so a short capture sits next to the input row,
+              not floating in the middle of an oversized pane (tmux pane height ≠ React container) */}
           <div
             ref={outputRef}
-            className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[13px] leading-[1.35]"
-            style={{ background: "#0a0a0f", whiteSpace: "pre", wordBreak: "normal", overflowX: "auto", color: "#aaa" }}
+            className="flex-1 overflow-auto"
+            style={{ background: "#0a0a0f" }}
           >
             {captureHtml ? (
-              <div dangerouslySetInnerHTML={{ __html: captureHtml }} />
+              <div
+                className="min-h-full flex flex-col justify-end px-3 py-2 font-mono text-[13px] leading-[1.35]"
+                style={{ whiteSpace: "pre", wordBreak: "normal", color: "#aaa" }}
+              >
+                <div dangerouslySetInnerHTML={{ __html: captureHtml }} />
+              </div>
             ) : (
-              <div className="text-white/15 text-center mt-[30vh] text-sm">
+              <div className="h-full flex items-center justify-center text-white/15 text-sm font-mono">
                 {selectedTarget ? "connecting..." : "select a window ←"}
               </div>
             )}
@@ -717,24 +727,25 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
         </div>
       )}
 
-      {/* Output */}
+      {/* Output — bottom-aligned (matches desktop behavior; trimmed capture sits at the bottom) */}
       <div
         ref={outputRef}
-        className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[12px] leading-[1.4]"
+        className="flex-1 overflow-auto"
         style={{
           background: copyMode ? "#1a1208" : "#0a0a0f",
-          whiteSpace: "pre",
-          wordBreak: "normal",
-          overflowX: "auto",
-          color: "#aaa",
           userSelect: copyMode ? "text" : "none",
           WebkitUserSelect: copyMode ? "text" : "none",
         }}
       >
         {captureHtml ? (
-          <div dangerouslySetInnerHTML={{ __html: displayHtml }} />
+          <div
+            className="min-h-full flex flex-col justify-end px-3 py-2 font-mono text-[12px] leading-[1.4]"
+            style={{ whiteSpace: "pre", wordBreak: "normal", color: "#aaa" }}
+          >
+            <div dangerouslySetInnerHTML={{ __html: displayHtml }} />
+          </div>
         ) : (
-          <div className="text-white/15 text-center mt-[30vh] text-sm">
+          <div className="h-full flex items-center justify-center text-white/15 text-sm font-mono">
             {selectedTarget ? "connecting..." : "tap ☰ to select a window"}
           </div>
         )}
