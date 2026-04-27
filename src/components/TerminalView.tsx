@@ -9,6 +9,11 @@ interface TerminalViewProps {
   agents: AgentState[];
   connected: boolean;
   onSelectAgent: (agent: AgentState) => void;
+  // Desktop deep-link pre-selection: App.tsx resolves /#terminal/<agent> hash → agent.target
+  // and passes it here so the sidebar opens to that target. Mobile keeps the fullscreen
+  // TerminalModal route instead. Boss-flagged 2026-04-27 23:01 — modal-on-desktop hid
+  // the sidebar+main layout, looked like "mobile on desktop".
+  initialTarget?: string | null;
 }
 
 // Raw key sequences forwarded to tmux (matches xterm escape codes)
@@ -23,7 +28,7 @@ const KEY_SEQUENCES: Record<string, string> = {
   CtrlD: "\x04",
 };
 
-export const TerminalView = memo(function TerminalView({ sessions, agents, connected, onSelectAgent }: TerminalViewProps) {
+export const TerminalView = memo(function TerminalView({ sessions, agents, connected, onSelectAgent, initialTarget }: TerminalViewProps) {
   // Container-aware narrow check (replaces window-level useIsMobile). Boss
   // 2026-04-27 23:01: /maw/#terminal rendered mobile layout on Chrome desktop.
   // Window matchMedia returns false at desktop widths, but the actual
@@ -126,6 +131,21 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     const first = sessions[0]?.windows[0];
     if (first) selectWindow(`${sessions[0].name}:${first.index}`);
   }, [isMobile, selectedTarget, sessions, selectWindow]);
+
+  // Desktop deep-link: when App.tsx resolves /#terminal/<agent>, pre-select that
+  // target in the sidebar instead of letting the fullscreen TerminalModal cover the
+  // desktop layout. Verify the target still exists in current sessions before
+  // applying — agents stream in async and a stale hash would silently mis-select.
+  const initialTargetAppliedRef = useRef(false);
+  useEffect(() => {
+    if (initialTargetAppliedRef.current) return;
+    if (!initialTarget) return;
+    if (selectedTarget) { initialTargetAppliedRef.current = true; return; }
+    const exists = sessions.some(s => s.windows.some(w => `${s.name}:${w.index}` === initialTarget));
+    if (!exists) return;
+    selectWindow(initialTarget);
+    initialTargetAppliedRef.current = true;
+  }, [initialTarget, selectedTarget, sessions, selectWindow]);
 
   // Flush send queue
   useEffect(() => {
@@ -517,8 +537,10 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
             </span>
           </div>
 
-          {/* Output — bottom-aligned so a short capture sits next to the input row,
-              not floating in the middle of an oversized pane (tmux pane height ≠ React container) */}
+          {/* Output — top-aligned, fills naturally from the top down. Auto-scroll-to-bottom on
+              new content keeps the prompt visible. Prior bottom-align (dfad64b) created a large
+              empty area above the content for idle oracles where the trimmed capture is short
+              (Boss flagged 23:01 as "doesn't fill the screen, looks like mobile"). */}
           <div
             ref={outputRef}
             className="flex-1 overflow-auto"
@@ -526,7 +548,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
           >
             {captureHtml ? (
               <div
-                className="min-h-full flex flex-col justify-end px-3 py-2 font-mono text-[13px] leading-[1.35]"
+                className="px-3 py-2 font-mono text-[13px] leading-[1.35]"
                 style={{ whiteSpace: "pre", wordBreak: "normal", color: "#aaa" }}
               >
                 <div dangerouslySetInnerHTML={{ __html: captureHtml }} />
