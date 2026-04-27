@@ -784,7 +784,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
       >
         {captureHtml ? (
           <div
-            className="min-h-full flex flex-col justify-end px-3 py-2 font-mono text-[12px] leading-[1.4]"
+            className="px-3 py-2 font-mono text-[12px] leading-[1.4]"
             style={{ whiteSpace: "pre", wordBreak: "normal", color: "#aaa" }}
           >
             <div dangerouslySetInnerHTML={{ __html: displayHtml }} />
