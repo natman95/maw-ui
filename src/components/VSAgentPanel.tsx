@@ -23,7 +23,9 @@ export const VSAgentPanel = memo(function VSAgentPanel({ agent, send, onPickAgen
     if (!agent) return;
     setContent("");
     isFirstContent.current = true;
-    send({ type: "subscribe", target: agent.target });
+    // scope "preview" — VSAgentPanel watches an agent without clobbering
+    // TerminalView's main target on the singleton WS.
+    send({ type: "subscribe", target: agent.target, scope: "preview" });
     const poll = setInterval(async () => {
       try {
         const res = await fetch(apiUrl(`/api/capture?target=${encodeURIComponent(agent.target)}`));

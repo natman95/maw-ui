@@ -287,14 +287,16 @@ export const FleetGrid = memo(function FleetGrid({
     if (pinnedPreview && pinnedPreview.agent.target === agent.target) { setPinnedPreview(null); return; }
     setPinnedPreview({ agent, accent, label, pos: { x: e.clientX, y: e.clientY } });
     setHoverPreview(null);
-    send({ type: "subscribe", target: agent.target });
+    // scope "preview" — pinned preview must not clobber the singleton WS's
+    // main target, which TerminalView elsewhere relies on for capture stream.
+    send({ type: "subscribe", target: agent.target, scope: "preview" });
   }, [pinnedPreview, send]);
 
   // After sending via mic input, open pinned preview to watch the result
   const onSendDone = useCallback((agent: AgentState, accent: string, label: string) => {
     setPinnedPreview({ agent, accent, label, pos: { x: window.innerWidth / 2, y: window.innerHeight / 2 } });
     setHoverPreview(null);
-    send({ type: "subscribe", target: agent.target });
+    send({ type: "subscribe", target: agent.target, scope: "preview" });
   }, [send]);
 
   useEffect(() => {

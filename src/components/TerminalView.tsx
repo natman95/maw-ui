@@ -80,7 +80,12 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
 
   // Shared WebSocket with reconnection for capture stream
   const handleCapture = useCallback((data: any) => {
-    if (data.type === "capture") {
+    // Filter by target — singleton WS may deliver capture frames for the
+    // previous target during a tab-switch race window (subscribe → backend
+    // updates ws.data.target → next interval). Without this guard, all 5
+    // tabs render whichever target the last subscribe-clobber pinned
+    // (Boss-flagged 2026-04-29: every tab showed labubu).
+    if (data.type === "capture" && data.target === selectedTargetRef.current) {
       const out = outputRef.current;
       const atBottom = out ? out.scrollHeight - out.scrollTop - out.clientHeight < 60 : true;
       // Trim trailing blank rows so the prompt sits next to the input row instead of floating

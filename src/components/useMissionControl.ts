@@ -256,7 +256,9 @@ export function useMissionControl({ sessions, agents, send, onSelectAgent, addEv
       pinnedByUser.current = true;
       setPinnedPreview({ agent, room, pos, svgX, svgY });
       setHoverPreview(null);
-      send({ type: "subscribe", target: agent.target });
+      // scope "preview" — pinned mission-control preview must not clobber
+      // TerminalView's main target on the singleton WS.
+      send({ type: "subscribe", target: agent.target, scope: "preview" });
     },
     [calcCardPos, send, pinnedPreview, addEvent]
   );
