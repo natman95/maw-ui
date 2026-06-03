@@ -68,7 +68,10 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
   const [scrollAtBottom, setScrollAtBottom] = useState(true);
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceUnsupported, setVoiceUnsupported] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ msg: string; kind: "ok" | "warn" | "err" } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [shotBusy, setShotBusy] = useState(false);
@@ -157,10 +160,12 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     setSendQueue(q => [...q, text]);
   }, [selectedTarget]);
 
-  // Toast helper (mobile)
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 1800);
+  // Toast helper — kind defaults to "ok" so #55's single-arg mobile calls keep working,
+  // while #59's attach calls pass "warn"/"err" for color-coded feedback.
+  const showToast = useCallback((msg: string, kind: "ok" | "warn" | "err" = "ok") => {
+    setToast({ msg, kind });
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 1800);
   }, []);
 
   // Paste handler — fires on right-click paste or Ctrl+Shift+V (desktop)
@@ -439,6 +444,39 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     ? sessions.flatMap(s => s.windows.map(w => ({ target: `${s.name}:${w.index}`, name: w.name }))).find(w => w.target === selectedTarget)?.name || ""
     : "";
 
+  // 📎 one-shot attach (input-line button): upload to labubu-upload, then inject the
+  // saved path into the SELECTED Oracle via queueSend — same path typing uses. maw only
+  // tracks claude panes as AgentState; a non-claude window would run the path as a shell
+  // command, so we guard with isClaudeWindow. (Distinct from handleFiles, the composer-
+  // staged multi-file attach in the header; both retained per Boss "keep both".)
+  const uploadAttachment = useCallback(async (file: File) => {
+    if (!selectedTarget) { showToast("เลือกหน้าต่างก่อนแนบภาพ", "warn"); return; }
+    const isClaudeWindow = agents.some(a => a.target === selectedTarget);
+    if (!isClaudeWindow) {
+      showToast(`"${selectedName || selectedTarget}" ไม่ใช่ Claude session — ไม่ได้ฉีดภาพ (เลือกหน้าต่าง Oracle)`, "warn");
+      return;
+    }
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/upload/api/file", { method: "POST", body: fd });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success || !data?.saved?.length) {
+        const reason = data?.errors?.[0]?.reason || `HTTP ${res.status}`;
+        showToast(`อัปโหลดล้มเหลว: ${reason}`, "err");
+        return;
+      }
+      const path: string = data.saved[0].path;
+      queueSend(`[ภาพแนบ — โปรดดู: ${path}]\n`);
+      showToast(`ส่งภาพไปที่ ${selectedName || selectedTarget} แล้ว`, "ok");
+    } catch {
+      showToast("อัปโหลดล้มเหลว (network)", "err");
+    } finally {
+      setUploading(false);
+    }
+  }, [selectedTarget, selectedName, agents, queueSend, showToast]);
+
   // ─── DESKTOP LAYOUT ───────────────────────────────────────────────
   if (!isMobile) {
     return (
@@ -611,6 +649,30 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
             className="flex items-start px-3 py-1.5 border-t border-white/[0.06] font-mono text-[13px] min-h-[32px]"
             style={{ background: "#0d0d14" }}
           >
+            {/* 📎 one-shot attach — target-aware: disabled until a window is selected */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) uploadAttachment(f);
+                e.target.value = "";  // allow re-selecting the same file
+              }}
+            />
+            <span
+              className="mr-2 mt-[1px] flex-shrink-0 select-none"
+              title={selectedTarget ? "แนบภาพไปยังหน้าต่างที่เลือก" : "เลือกหน้าต่างก่อน"}
+              style={{
+                cursor: selectedTarget && !uploading ? "pointer" : "not-allowed",
+                opacity: selectedTarget && !uploading ? 0.85 : 0.25,
+              }}
+              onMouseDown={(e) => e.preventDefault()}  // keep terminal focus
+              onClick={() => { if (selectedTarget && !uploading) fileInputRef.current?.click(); }}
+            >
+              {uploading ? "⏳" : "📎"}
+            </span>
             <span className="text-white/30 mr-2 mt-[1px] flex-shrink-0">&gt;</span>
             <span className="text-white/90 whitespace-pre flex-1">{inputBuf}</span>
             <span
@@ -649,9 +711,13 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
       {toast && (
         <div
           className="fixed top-16 left-1/2 -translate-x-1/2 px-4 py-2.5 text-sm shadow-2xl z-50 font-mono rounded-xl"
-          style={{ background: "#111827", border: "1px solid rgba(168, 85, 247, 0.4)", color: "#e5e7eb" }}
+          style={{
+            background: "#111827",
+            border: `1px solid ${toast.kind === "warn" ? "rgba(234, 179, 8, 0.5)" : toast.kind === "err" ? "rgba(239, 68, 68, 0.5)" : "rgba(168, 85, 247, 0.4)"}`,
+            color: toast.kind === "err" ? "#fca5a5" : toast.kind === "warn" ? "#fde68a" : "#e5e7eb",
+          }}
         >
-          {toast}
+          {toast.kind === "warn" ? "⚠ " : toast.kind === "err" ? "✕ " : ""}{toast.msg}
         </div>
       )}
       </>
@@ -1034,9 +1100,13 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
       {toast && (
         <div
           className="fixed top-16 left-1/2 -translate-x-1/2 px-4 py-2.5 text-sm shadow-2xl z-50 font-mono rounded-xl"
-          style={{ background: "#111827", border: "1px solid rgba(168, 85, 247, 0.4)", color: "#e5e7eb" }}
+          style={{
+            background: "#111827",
+            border: `1px solid ${toast.kind === "warn" ? "rgba(234, 179, 8, 0.5)" : toast.kind === "err" ? "rgba(239, 68, 68, 0.5)" : "rgba(168, 85, 247, 0.4)"}`,
+            color: toast.kind === "err" ? "#fca5a5" : toast.kind === "warn" ? "#fde68a" : "#e5e7eb",
+          }}
         >
-          {toast}
+          {toast.kind === "warn" ? "⚠ " : toast.kind === "err" ? "✕ " : ""}{toast.msg}
         </div>
       )}
     </div>
