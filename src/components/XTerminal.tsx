@@ -95,8 +95,21 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
     let ws: WebSocket | null = null;
     let dataSub: { dispose: () => void } | null = null;
     let binSub: { dispose: () => void } | null = null;
+    let scrollSub: { dispose: () => void } | null = null;
     let resizeTimer: ReturnType<typeof setTimeout>;
     let resizeObserver: ResizeObserver | null = null;
+
+    // Follow-tail state. xterm.js only auto-sticks to the bottom when the
+    // viewport is *already* exactly at baseY; the attach sequence (a large
+    // replayCapture blob + tmux's live redraw with cursor repositioning) lands
+    // the viewport off-bottom, which permanently defeats that default — every
+    // later write looks "not at bottom" so new output never scrolls into view
+    // (Boss: dashboard pane never follows, desktop + mobile). We restore the
+    // follow-tail explicitly, mirroring TerminalView's atBottom→scrollTo logic.
+    // `stick` defaults true (follow); a user scroll-up turns it off, scrolling
+    // back to the bottom turns it on again. Each followed write re-asserts the
+    // bottom, so a corrupted initial viewport position self-heals.
+    let stick = true;
 
     // Defer open until container has dimensions (avoids "dimensions" crash on first render)
     const openTimer = setTimeout(() => {
@@ -105,6 +118,14 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
         fit.fit();
         term.focus();
       } catch { return; }
+
+      // Track whether the viewport is pinned to the bottom. Fires on both user
+      // scrolls and programmatic scrollToBottom (which re-pins stick=true), so
+      // the follow-tail recovers itself after every followed write.
+      scrollSub = term.onScroll(() => {
+        const b = term.buffer.active;
+        stick = b.viewportY >= b.baseY - 1;
+      });
 
       // Connect to PTY WebSocket
       ws = new WebSocket(wsUrl("/ws/pty"));
@@ -127,14 +148,25 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
             if (msg.type === "attached") {
               // Fit terminal to container — server ignores resize for grouped sessions
               try { fit.fit(); } catch {}
+              // Pin to the bottom once the replay + redraw have settled, so the
+              // follow-tail starts from a known at-bottom baseline rather than
+              // wherever tmux's repaint left the viewport.
+              stick = true;
+              requestAnimationFrame(() => { try { term.scrollToBottom(); } catch {} });
             }
             if (msg.type === "detached") {
               term.write("\r\n\x1b[33m[session detached]\x1b[0m\r\n");
             }
           } catch {}
         } else {
-          // Binary PTY data → render in xterm.js
-          term.write(new Uint8Array(e.data));
+          // Binary PTY data → render in xterm.js. Capture follow state BEFORE
+          // the write (the write grows baseY); re-pin to the bottom afterward
+          // if we were following, so live output stays in view without yanking
+          // a user who has scrolled up to read history.
+          const wasStick = stick;
+          term.write(new Uint8Array(e.data), () => {
+            if (wasStick) term.scrollToBottom();
+          });
         }
       };
 
@@ -195,6 +227,7 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
       resizeObserver?.disconnect();
       dataSub?.dispose();
       binSub?.dispose();
+      scrollSub?.dispose();
       ws?.close();
       if (wsRef.current === ws) wsRef.current = null;
       term.dispose();
