@@ -23,6 +23,11 @@ export interface XTerminalHandle {
 
 const enc = new TextEncoder();
 
+// "At bottom" tolerance in CSS px. Smaller than one row (~18px) so a deliberate
+// one-line scroll-up reads as not-at-bottom, but large enough to absorb
+// sub-pixel rounding during active tailing.
+const AT_BOTTOM_EPS_PX = 8;
+
 // Catppuccin Mocha palette (matches AC array in ansi.ts)
 const THEME = {
   background: "#0a0a0f",
@@ -97,29 +102,36 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
     term.loadAddon(fit);
 
     let ws: WebSocket | null = null;
+    let viewportEl: HTMLElement | null = null;
     let dataSub: { dispose: () => void } | null = null;
     let binSub: { dispose: () => void } | null = null;
     let resizeTimer: ReturnType<typeof setTimeout>;
     let resizeObserver: ResizeObserver | null = null;
 
-    // Follow-tail = plain standard-terminal / tmux semantics, derived purely
-    // from "is the viewport at the bottom right now". No mode, no lock, no
-    // button:
-    //   • Viewport parked at the bottom  → new output tails (scroll to bottom
-    //     after the write).
-    //   • Viewport scrolled up           → output appends into the scrollback
-    //     below; the view stays exactly where the user put it (we DON'T scroll).
-    //   • User scrolls back to the bottom → the next write sees at-bottom again
-    //     and tailing resumes on its own.
+    // Follow-tail = plain standard-terminal / tmux semantics: tail at the
+    // bottom, stay put when scrolled up, resume tailing when the user returns.
+    // No mode, no lock, no button.
     //
-    // at-bottom is read synchronously *before each write* rather than cached in
-    // a flag, so a user scroll is never masked, guarded, or ignored: the instant
-    // the viewport leaves the bottom the next write stops tailing; the instant it
-    // returns, tailing resumes. The only reason we scroll explicitly at all is
-    // that xterm.js won't auto-stick here — the attach replay (a large
-    // replayCapture blob + tmux's live redraw) lands the viewport off-bottom,
-    // defeating xterm's at-baseY auto-follow — and we gate that explicit scroll
-    // on wasAtBottom so claude's clear+repaint can never yank a scrolled-up user.
+    // The source of truth for "is the user at the bottom" is the DOM
+    // .xterm-viewport (scrollHeight − scrollTop − clientHeight ≤ EPS), read
+    // synchronously before each write — NOT xterm's buffer.viewportY.
+    //
+    // Why not viewportY: xterm only updates viewportY / its internal
+    // isUserScrolling flag from the DOM 'scroll' event, and browsers dispatch
+    // scroll events asynchronously (next frame). On mobile, a touch-drag changes
+    // .xterm-viewport.scrollTop instantly but xterm's state lags a frame; claude
+    // streams several writes/sec, so a write lands in that stale window while
+    // isUserScrolling is still false → xterm's auto-follow (BufferService.scroll:
+    // `isUserScrolling || ydisp++`) yanks the viewport to the new bottom. That is
+    // the "drag up, snaps back immediately" bounce — and it lives in xterm's own
+    // render, which is why the previous stick-flag fixes (callback layer) missed.
+    //
+    // Fix: read the DOM before each write. If the user is scrolled up there but
+    // xterm still thinks it's at the bottom, sync xterm to the DOM *now*
+    // (scrollToLine flips isUserScrolling synchronously) so the upcoming write
+    // can't auto-follow. The explicit scrollToBottom (gated on DOM-at-bottom) is
+    // still needed because the attach replay + tmux redraw land the viewport
+    // off-bottom, defeating xterm's at-baseY auto-stick.
 
     // Defer open until container has dimensions (avoids "dimensions" crash on first render)
     const openTimer = setTimeout(() => {
@@ -162,15 +174,25 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
             }
           } catch {}
         } else {
-          // Binary PTY data → render in xterm.js. Tail the bottom only if the
-          // user is parked there *right now* — read synchronously before the
-          // write. If they've scrolled up to read history, the write just
-          // appends into the scrollback below and their view stays put; the
-          // moment they scroll back to the bottom the next write tails again.
+          // Binary PTY data → render in xterm.js. Decide tail-vs-stay from the
+          // DOM viewport (the user's real position this instant), not xterm's
+          // frame-lagged viewportY — see the block comment above.
           const b = term.buffer.active;
-          const wasAtBottom = b.viewportY >= b.baseY - 1;
+          const vp = viewportEl ?? (viewportEl = container.querySelector(".xterm-viewport"));
+          let atBottom = b.viewportY >= b.baseY - 1; // fallback if DOM not ready
+          if (vp) {
+            atBottom = vp.scrollHeight - vp.scrollTop - vp.clientHeight <= AT_BOTTOM_EPS_PX;
+            // Stale window: DOM is scrolled up but xterm's state still reads
+            // at-bottom (its async scroll event hasn't fired). Sync xterm to the
+            // DOM now so the write below cannot auto-follow and bounce the user.
+            if (!atBottom && b.viewportY >= b.baseY - 1 && b.length > 0) {
+              const rowH = vp.scrollHeight / b.length;
+              const targetLine = Math.max(0, Math.min(b.baseY, Math.round(vp.scrollTop / rowH)));
+              try { term.scrollToLine(targetLine); } catch {}
+            }
+          }
           term.write(new Uint8Array(e.data), () => {
-            if (wasAtBottom) { try { term.scrollToBottom(); } catch {} }
+            if (atBottom) { try { term.scrollToBottom(); } catch {} }
           });
         }
       };

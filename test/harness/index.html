@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>XTerminal mobile-scroll repro harness</title>
+    <style>
+      html, body { margin: 0; padding: 0; background: #0a0a0f; }
+      /* Phone-sized terminal box so there is real scrollback to drag into */
+      #box { position: fixed; inset: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="box"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
