@@ -99,37 +99,27 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
     let ws: WebSocket | null = null;
     let dataSub: { dispose: () => void } | null = null;
     let binSub: { dispose: () => void } | null = null;
-    let scrollSub: { dispose: () => void } | null = null;
     let resizeTimer: ReturnType<typeof setTimeout>;
     let resizeObserver: ResizeObserver | null = null;
 
-    // Follow-tail state. xterm.js only auto-sticks to the bottom when the
-    // viewport is *already* exactly at baseY; the attach sequence (a large
-    // replayCapture blob + tmux's live redraw with cursor repositioning) lands
-    // the viewport off-bottom, which permanently defeats that default — every
-    // later write looks "not at bottom" so new output never scrolls into view
-    // (Boss: dashboard pane never follows, desktop + mobile). We restore the
-    // follow-tail explicitly, mirroring TerminalView's atBottom→scrollTo logic.
+    // Follow-tail = plain standard-terminal / tmux semantics, derived purely
+    // from "is the viewport at the bottom right now". No mode, no lock, no
+    // button:
+    //   • Viewport parked at the bottom  → new output tails (scroll to bottom
+    //     after the write).
+    //   • Viewport scrolled up           → output appends into the scrollback
+    //     below; the view stays exactly where the user put it (we DON'T scroll).
+    //   • User scrolls back to the bottom → the next write sees at-bottom again
+    //     and tailing resumes on its own.
     //
-    // Two-flag model so a deliberate scroll-up *holds*. claude's Ink TUI
-    // repaints by clear+rewrite; each repaint write momentarily collapses the
-    // viewport to the bottom and fires onScroll. The old single-`stick` model
-    // re-read that collapse as "user is at bottom" → silently re-enabled follow
-    // → the next write yanked a user who had scrolled up to read history.
-    //   `stick`        — currently following the bottom (re-asserted per write).
-    //   `userPinnedUp` — DURABLE user intent. Set when the *user* scrolls up;
-    //                    cleared only when the *user* scrolls back to the bottom
-    //                    (or taps "jump to latest"). A programmatic or
-    //                    content-driven scroll must never clear it.
-    //   `scrollGuard`  — refcount >0 while our own writes / scrollToBottom are
-    //                    in flight; masks the *re-stick* branch of onScroll so a
-    //                    repaint collapse can't be mistaken for a user gesture.
-    //                    Scroll-*up* is never masked (repaints collapse toward
-    //                    the bottom, never away), so the user can pin mid-burst.
-    let stick = true;
-    let userPinnedUp = false;
-    let scrollGuard = 0;
-    let jumpBtn: HTMLButtonElement | null = null;
+    // at-bottom is read synchronously *before each write* rather than cached in
+    // a flag, so a user scroll is never masked, guarded, or ignored: the instant
+    // the viewport leaves the bottom the next write stops tailing; the instant it
+    // returns, tailing resumes. The only reason we scroll explicitly at all is
+    // that xterm.js won't auto-stick here — the attach replay (a large
+    // replayCapture blob + tmux's live redraw) lands the viewport off-bottom,
+    // defeating xterm's at-baseY auto-follow — and we gate that explicit scroll
+    // on wasAtBottom so claude's clear+repaint can never yank a scrolled-up user.
 
     // Defer open until container has dimensions (avoids "dimensions" crash on first render)
     const openTimer = setTimeout(() => {
@@ -138,54 +128,6 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
         fit.fit();
         term.focus();
       } catch { return; }
-
-      // Lightweight "jump to latest" affordance — pure DOM, no React re-render,
-      // no keybar involvement. Visible only while the user is pinned up; one tap
-      // resumes follow. Positioned inside the container (made relative below).
-      const syncJumpBtn = () => {
-        if (jumpBtn) jumpBtn.style.display = userPinnedUp ? "block" : "none";
-      };
-      try {
-        if (!container.style.position) container.style.position = "relative";
-        jumpBtn = document.createElement("button");
-        jumpBtn.textContent = "↓ latest";
-        jumpBtn.setAttribute("aria-label", "Jump to latest output");
-        jumpBtn.style.cssText =
-          "position:absolute;right:12px;bottom:12px;z-index:5;display:none;" +
-          "padding:4px 11px;font:500 12px/1.2 Inter,system-ui,sans-serif;" +
-          "color:#0a0a0f;background:#22d3ee;border:none;border-radius:9999px;" +
-          "box-shadow:0 2px 8px rgba(0,0,0,.45);cursor:pointer;opacity:.92;";
-        jumpBtn.onclick = () => {
-          stick = true;
-          userPinnedUp = false;
-          scrollGuard++;
-          try { term.scrollToBottom(); } catch {}
-          scrollGuard--;
-          syncJumpBtn();
-          if (!readOnly) term.focus();
-        };
-        container.appendChild(jumpBtn);
-      } catch {}
-
-      // Follow state tracks *user* scrolls. A scroll away from the bottom is
-      // always a real "hold here" intent (repaints collapse toward the bottom,
-      // never away), so it pins durably. A scroll *to* the bottom resumes follow
-      // ONLY when scrollGuard is clear — during our own writes/scrollToBottom a
-      // content-driven collapse also lands at the bottom, and must not silently
-      // re-stick under a user who deliberately scrolled up.
-      scrollSub = term.onScroll(() => {
-        const b = term.buffer.active;
-        const atBottom = b.viewportY >= b.baseY - 1;
-        if (atBottom) {
-          if (scrollGuard > 0) return;
-          stick = true;
-          userPinnedUp = false;
-        } else {
-          stick = false;
-          userPinnedUp = true;
-        }
-        syncJumpBtn();
-      });
 
       // Connect to PTY WebSocket
       ws = new WebSocket(wsUrl("/ws/pty"));
@@ -208,35 +150,27 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
             if (msg.type === "attached") {
               // Fit terminal to container — server ignores resize for grouped sessions
               try { fit.fit(); } catch {}
-              // Pin to the bottom once the replay + redraw have settled, so the
-              // follow-tail starts from a known at-bottom baseline rather than
-              // wherever tmux's repaint left the viewport — unless the user has
-              // already scrolled up (durable intent wins over the reset).
-              if (!userPinnedUp) {
-                stick = true;
-                requestAnimationFrame(() => {
-                  scrollGuard++;
-                  try { term.scrollToBottom(); } catch {}
-                  scrollGuard--;
-                });
-              }
+              // Start tailing from a known at-bottom baseline once the replay +
+              // redraw settle (the attach leaves the viewport off-bottom). The
+              // user hasn't scrolled yet at attach time, so this is unconditional.
+              requestAnimationFrame(() => {
+                try { term.scrollToBottom(); } catch {}
+              });
             }
             if (msg.type === "detached") {
               term.write("\r\n\x1b[33m[session detached]\x1b[0m\r\n");
             }
           } catch {}
         } else {
-          // Binary PTY data → render in xterm.js. Follow the bottom only if we
-          // were sticking AND the user hasn't pinned up. scrollGuard is held
-          // across the write so the onScroll that the write's repaint (and our
-          // scrollToBottom) emits can't flip follow back on under a user who
-          // scrolled up to read history.
-          const wasFollowing = stick && !userPinnedUp;
-          scrollGuard++;
+          // Binary PTY data → render in xterm.js. Tail the bottom only if the
+          // user is parked there *right now* — read synchronously before the
+          // write. If they've scrolled up to read history, the write just
+          // appends into the scrollback below and their view stays put; the
+          // moment they scroll back to the bottom the next write tails again.
+          const b = term.buffer.active;
+          const wasAtBottom = b.viewportY >= b.baseY - 1;
           term.write(new Uint8Array(e.data), () => {
-            if (wasFollowing) { try { term.scrollToBottom(); } catch {} }
-            scrollGuard--;
-            syncJumpBtn();
+            if (wasAtBottom) { try { term.scrollToBottom(); } catch {} }
           });
         }
       };
@@ -298,8 +232,6 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
       resizeObserver?.disconnect();
       dataSub?.dispose();
       binSub?.dispose();
-      scrollSub?.dispose();
-      jumpBtn?.remove();
       ws?.close();
       if (wsRef.current === ws) wsRef.current = null;
       term.dispose();
