@@ -4,26 +4,17 @@
  */
 
 import { apiUrl } from "./api";
-import { getAuthToken } from "../components/PinLock";
 
-interface ApiOptions extends RequestInit {
-  /** Skip auth header (e.g. for pin-verify) */
-  noAuth?: boolean;
-}
+type ApiOptions = RequestInit;
 
-/** Fetch from MAW API with auth token and consistent error handling */
+/** Fetch from MAW API with consistent error handling.
+ * Auth is the nginx login session (cookie) — no app-level token. */
 export async function apiFetch<T = any>(path: string, options: ApiOptions = {}): Promise<T> {
-  const { noAuth, ...fetchOpts } = options;
+  const fetchOpts = options;
 
   const headers: Record<string, string> = {
     ...(fetchOpts.headers as Record<string, string> || {}),
   };
-
-  // Add auth token if available
-  if (!noAuth) {
-    const token = getAuthToken();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-  }
 
   // Add content-type for POST/PUT
   if (fetchOpts.body && !headers["Content-Type"]) {
