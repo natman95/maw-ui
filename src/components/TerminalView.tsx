@@ -108,22 +108,26 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
     ? sessions.flatMap(s => s.windows.map(w => ({ target: `${s.name}:${w.index}`, name: w.name }))).find(w => w.target === selectedTarget)?.name || ""
     : "";
 
-  // 📎 attach: upload an image to labubu-upload, then inject its saved path into
-  // the SELECTED Oracle session via the same queueSend path used for typing.
-  // maw only tracks claude panes as AgentState — no agent for a target ⇒ it's a
-  // bash/non-claude window, so we warn instead of injecting (path would run as a
-  // shell command and the image would never reach an Oracle's context).
+  // 📎 attach: upload ANY file (image / pdf / word / excel / txt) to
+  // labubu-upload, then inject its saved path into the SELECTED Oracle session
+  // via the same queueSend path used for typing. `kind:"chat"` routes the upload
+  // to /root/imports/maw-attach regardless of type. maw only tracks claude panes
+  // as AgentState — no agent for a target ⇒ it's a bash/non-claude window, so we
+  // warn instead of injecting (path would run as a shell command and the file
+  // would never reach an Oracle's context). Marker label is ภาพแนบ for images,
+  // ไฟล์แนบ for every other file — the maw bridge wake-stub regex matches both.
   const uploadAttachment = useCallback(async (file: File) => {
-    if (!selectedTarget) { showToast("เลือกหน้าต่างก่อนแนบภาพ", "warn"); return; }
+    if (!selectedTarget) { showToast("เลือกหน้าต่างก่อนแนบไฟล์", "warn"); return; }
     const isClaudeWindow = agents.some(a => a.target === selectedTarget);
     if (!isClaudeWindow) {
-      showToast(`"${selectedName || selectedTarget}" ไม่ใช่ Claude session — ไม่ได้ฉีดภาพ (เลือกหน้าต่าง Oracle)`, "warn");
+      showToast(`"${selectedName || selectedTarget}" ไม่ใช่ Claude session — ไม่ได้ฉีดไฟล์ (เลือกหน้าต่าง Oracle)`, "warn");
       return;
     }
     setUploading(true);
     try {
       const fd = new FormData();
       fd.append("file", file);
+      fd.append("kind", "chat");
       const res = await fetch("/upload/api/file", { method: "POST", credentials: "same-origin", body: fd });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.success || !data?.saved?.length) {
@@ -132,8 +136,10 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
         return;
       }
       const path: string = data.saved[0].path;
-      queueSend(`[ภาพแนบ — โปรดดู: ${path}]\n`);
-      showToast(`ส่งภาพไปที่ ${selectedName || selectedTarget} แล้ว`, "ok");
+      const isImage = file.type.startsWith("image/");
+      const marker = isImage ? "ภาพแนบ" : "ไฟล์แนบ";
+      queueSend(`[${marker} — โปรดดู: ${path}]\n`);
+      showToast(isImage ? `ส่งภาพไปที่ ${selectedName || selectedTarget} แล้ว` : `ส่งไฟล์ ${file.name} ไปที่ ${selectedName || selectedTarget} แล้ว`, "ok");
     } catch {
       showToast("อัปโหลดล้มเหลว (network)", "err");
     } finally {
@@ -320,11 +326,12 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
           className="flex items-start px-3 py-1.5 border-t border-white/[0.06] font-mono text-[13px] min-h-[32px]"
           style={{ background: "#0d0d14" }}
         >
-          {/* 📎 attach — target-aware: disabled until a window is selected */}
+          {/* 📎 attach — target-aware: disabled until a window is selected. No
+              `accept` filter so phones open the full file picker (not the
+              image-only photo picker); accepts image/pdf/word/excel/txt. */}
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
@@ -334,7 +341,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
           />
           <span
             className="mr-2 mt-[1px] flex-shrink-0 select-none"
-            title={selectedTarget ? "แนบภาพไปยังหน้าต่างที่เลือก" : "เลือกหน้าต่างก่อน"}
+            title={selectedTarget ? "แนบไฟล์ไปยังหน้าต่างที่เลือก" : "เลือกหน้าต่างก่อน"}
             style={{
               cursor: selectedTarget && !uploading ? "pointer" : "not-allowed",
               opacity: selectedTarget && !uploading ? 0.85 : 0.25,

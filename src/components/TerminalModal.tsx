@@ -37,20 +37,25 @@ export function TerminalModal({ agent, send, onClose, onNavigate, onSelectSiblin
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   }, []);
 
-  // 📎 attach: upload an image to labubu-upload, then deliver its saved path to
-  // the running Oracle session. Routes through the SAME shared-dashboard-WS
-  // `send` command TerminalView uses ({type:"send", force:true}) — NOT the xterm
-  // PTY attach socket. The dashboard pane is a *grouped* tmux session whose PTY
-  // attach is display-oriented: the server streams output but drops injected
-  // input (same reason it ignores resize on grouped sessions), so xterm.inject()
-  // clears the field without ever reaching the session. Trailing `\n` submits,
-  // mirroring TerminalView's attach. The modal only opens for a tracked agent
-  // (claude pane), so the target is always a valid Oracle — no guard needed.
+  // 📎 attach: upload ANY file (image / pdf / word / excel / txt) to
+  // labubu-upload, then deliver its saved path to the running Oracle session.
+  // `kind:"chat"` routes the upload to /root/imports/maw-attach regardless of
+  // type. Routes through the SAME shared-dashboard-WS `send` command
+  // TerminalView uses ({type:"send", force:true}) — NOT the xterm PTY attach
+  // socket. The dashboard pane is a *grouped* tmux session whose PTY attach is
+  // display-oriented: the server streams output but drops injected input (same
+  // reason it ignores resize on grouped sessions), so xterm.inject() clears the
+  // field without ever reaching the session. Trailing `\n` submits, mirroring
+  // TerminalView's attach. The marker label is ภาพแนบ for images, ไฟล์แนบ for
+  // every other file — the maw bridge's wake-stub regex matches both. The modal
+  // only opens for a tracked agent (claude pane), so the target is always a
+  // valid Oracle — no guard needed.
   const uploadAttachment = useCallback(async (file: File) => {
     setUploading(true);
     try {
       const fd = new FormData();
       fd.append("file", file);
+      fd.append("kind", "chat");
       const res = await fetch("/upload/api/file", { method: "POST", credentials: "same-origin", body: fd });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.success || !data?.saved?.length) {
@@ -59,8 +64,10 @@ export function TerminalModal({ agent, send, onClose, onNavigate, onSelectSiblin
         return;
       }
       const path: string = data.saved[0].path;
-      send({ type: "send", target: agent.target, text: `[ภาพแนบ — โปรดดู: ${path}]\n`, force: true });
-      showToast(`ส่งภาพไปที่ ${agent.name} แล้ว`, "ok");
+      const isImage = file.type.startsWith("image/");
+      const marker = isImage ? "ภาพแนบ" : "ไฟล์แนบ";
+      send({ type: "send", target: agent.target, text: `[${marker} — โปรดดู: ${path}]\n`, force: true });
+      showToast(isImage ? `ส่งภาพไปที่ ${agent.name} แล้ว` : `ส่งไฟล์ ${file.name} ไปที่ ${agent.name} แล้ว`, "ok");
     } catch {
       showToast("อัปโหลดล้มเหลว (network)", "err");
     } finally {
@@ -159,11 +166,12 @@ export function TerminalModal({ agent, send, onClose, onNavigate, onSelectSiblin
           </div>
 
           <div className="ml-auto flex items-center gap-2 shrink-0">
-            {/* 📎 attach — upload an image and inject its saved path into this Oracle */}
+            {/* 📎 attach — upload ANY file (image/pdf/word/excel/txt) and inject its
+                saved path into this Oracle. No `accept` filter so phones open the
+                full file picker (not the image-only photo picker). */}
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
@@ -175,7 +183,7 @@ export function TerminalModal({ agent, send, onClose, onNavigate, onSelectSiblin
               onClick={() => { if (!uploading) fileInputRef.current?.click(); }}
               disabled={uploading}
               className="px-2 py-0.5 rounded text-[12px] font-mono text-white/40 hover:text-white/80 hover:bg-white/[0.06] border border-transparent hover:border-white/10 transition-all cursor-pointer disabled:cursor-not-allowed"
-              title={`แนบภาพไปยัง ${agent.name}`}
+              title={`แนบไฟล์ไปยัง ${agent.name}`}
             >
               {uploading ? "⏳" : "📎"}
             </button>
