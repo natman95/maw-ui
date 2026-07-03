@@ -8,25 +8,21 @@ import { useFleetStore } from "../lib/store";
 import type { AgentState, Session, AgentEvent } from "../lib/types";
 
 // ─── Token types ────────────────────────────────────────────────────
-interface TokenSession {
-  session: string;
-  project: string;
-  input: number;
-  output: number;
-  cache: number;
-  total: number;
-  turns: number;
-  date: string;
-}
-
-interface TokenRate {
+// Rewired 2026-07-03: /api/tokens went 410 Gone (sunset 2026-05-01) — the panel
+// silently showed empty data for two months. /api/costs is the live replacement
+// (per-agent aggregates incl. a REAL estimatedCost from the backend, replacing
+// the old blended-rate guess).
+interface CostAgent {
+  name: string;
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
   totalTokens: number;
-  totalPerMin: number;
-  inputPerMin: number;
-  outputPerMin: number;
+  estimatedCost: number;
+  sessions: number;
   turns: number;
+  lastActive?: string;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -37,12 +33,10 @@ function formatTokens(n: number): string {
   return `${n}`;
 }
 
-function formatCost(tokens: number): string {
-  // Rough estimate: ~$3/1M input, ~$15/1M output (blended ~$8/1M)
-  const cost = (tokens / 1_000_000) * 8;
+function formatUsd(cost: number): string {
   if (cost < 0.01) return "<$0.01";
-  if (cost < 1) return `$${cost.toFixed(2)}`;
-  return `$${cost.toFixed(1)}`;
+  if (cost < 100) return `$${cost.toFixed(2)}`;
+  return `$${Math.round(cost).toLocaleString()}`;
 }
 
 function timeAgo(ts: number): string {
@@ -196,63 +190,61 @@ function StatusOverview({ agents, feedActive, agentFeedLog, onSelectAgent, send 
 
 // ─── Token Tracking Panel ───────────────────────────────────────────
 function TokenTracking() {
-  const [sessions, setSessions] = useState<TokenSession[]>([]);
-  const [rate, setRate] = useState<TokenRate | null>(null);
+  const [agents, setAgents] = useState<CostAgent[]>([]);
   const [loading, setLoading] = useState(true);
+  // /api/costs is a heavy aggregate (~2-3s): guard against overlapping calls and
+  // throttle ws-triggered refreshes so a busy feed can't stack requests.
+  const inFlight = useRef(false);
+  const lastFetch = useRef(0);
 
-  const fetchTokens = useCallback(() => {
-    Promise.all([
-      fetch(apiUrl("/api/tokens")).then(r => r.ok ? r.json() : []),
-      fetch(apiUrl("/api/tokens/rate?mode=window&window=3600")).then(r => r.ok ? r.json() : null),
-    ]).then(([tokData, rateData]) => {
-      setSessions(Array.isArray(tokData) ? tokData : tokData?.sessions || []);
-      setRate(rateData);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+  const fetchCosts = useCallback((force = false) => {
+    const now = Date.now();
+    if (inFlight.current) return;
+    if (!force && now - lastFetch.current < 30_000) return;
+    inFlight.current = true;
+    fetch(apiUrl("/api/costs"))
+      .then(r => (r.ok ? r.json() : { agents: [] }))
+      .then(data => {
+        setAgents(Array.isArray(data?.agents) ? data.agents : []);
+        lastFetch.current = Date.now();
+        setLoading(false);
+      })
+      .catch(() => setLoading(false))
+      .finally(() => { inFlight.current = false; });
   }, []);
 
-  useEffect(() => { fetchTokens(); }, [fetchTokens]);
+  useEffect(() => { fetchCosts(true); }, [fetchCosts]);
 
-  // Real-time: refetch on feed events via WebSocket (replaces 30s polling)
-  const fetchRef = useRef(fetchTokens);
-  fetchRef.current = fetchTokens;
+  // Real-time: refetch on feed events via WebSocket (throttled above)
+  const fetchRef = useRef(fetchCosts);
+  fetchRef.current = fetchCosts;
   const handleWs = useCallback((msg: any) => {
     if (msg.type === "feed") fetchRef.current();
   }, []);
   useWebSocket(handleWs, { types: ["feed"] });
 
-  // Aggregate by project
-  const byProject = useMemo(() => {
-    const map = new Map<string, { input: number; output: number; cache: number; total: number; turns: number; sessions: number }>();
-    for (const s of sessions) {
-      const key = s.project || "unknown";
-      const prev = map.get(key) || { input: 0, output: 0, cache: 0, total: 0, turns: 0, sessions: 0 };
-      map.set(key, {
-        input: prev.input + s.input,
-        output: prev.output + s.output,
-        cache: prev.cache + s.cache,
-        total: prev.total + s.total,
-        turns: prev.turns + s.turns,
-        sessions: prev.sessions + 1,
-      });
-    }
-    return Array.from(map.entries()).sort((a, b) => b[1].total - a[1].total);
-  }, [sessions]);
+  // /api/costs already aggregates per agent/project
+  const byProject = useMemo(
+    () => [...agents].sort((a, b) => b.totalTokens - a.totalTokens),
+    [agents],
+  );
 
-  const grandTotal = useMemo(() => sessions.reduce((acc, s) => acc + s.total, 0), [sessions]);
-  const grandInput = useMemo(() => sessions.reduce((acc, s) => acc + s.input, 0), [sessions]);
-  const grandOutput = useMemo(() => sessions.reduce((acc, s) => acc + s.output, 0), [sessions]);
+  const grandTotal = useMemo(() => agents.reduce((acc, a) => acc + a.totalTokens, 0), [agents]);
+  const grandInput = useMemo(() => agents.reduce((acc, a) => acc + a.inputTokens, 0), [agents]);
+  const grandOutput = useMemo(() => agents.reduce((acc, a) => acc + a.outputTokens, 0), [agents]);
+  const grandCost = useMemo(() => agents.reduce((acc, a) => acc + a.estimatedCost, 0), [agents]);
+  const totalSessions = useMemo(() => agents.reduce((acc, a) => acc + a.sessions, 0), [agents]);
 
   return (
     <div className="space-y-4">
       <h2 className="text-sm font-bold tracking-widest text-white/60 uppercase px-1">Tokens</h2>
 
-      {/* Live rate + totals */}
+      {/* Totals (Burn Rate card retired with /api/tokens/rate — no live backing data) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Burn Rate" value={rate ? `${formatTokens(rate.totalPerMin)}/min` : "—"} accent="#fbbf24" sub={rate ? `${rate.turns} turns/hr` : ""} />
-        <StatCard label="Total" value={formatTokens(grandTotal)} accent="#22d3ee" sub={formatCost(grandTotal)} />
-        <StatCard label="Input" value={formatTokens(grandInput)} accent="#818cf8" sub={`${sessions.length} sessions`} />
-        <StatCard label="Output" value={formatTokens(grandOutput)} accent="#f472b6" sub={rate ? `${formatTokens(rate.outputPerMin)}/min` : ""} />
+        <StatCard label="Cost" value={formatUsd(grandCost)} accent="#fbbf24" sub="backend estimate" />
+        <StatCard label="Total" value={formatTokens(grandTotal)} accent="#22d3ee" sub={`${byProject.length} projects`} />
+        <StatCard label="Input" value={formatTokens(grandInput)} accent="#818cf8" sub={`${totalSessions} sessions`} />
+        <StatCard label="Output" value={formatTokens(grandOutput)} accent="#f472b6" />
       </div>
 
       {/* By project table */}
@@ -270,21 +262,20 @@ function TokenTracking() {
               </tr>
             </thead>
             <tbody>
-              {byProject.slice(0, 15).map(([project, data]) => {
-                const pct = grandTotal > 0 ? (data.total / grandTotal) * 100 : 0;
+              {byProject.slice(0, 15).map((a) => {
                 return (
-                  <tr key={project} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
+                  <tr key={a.name} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
                     <td className="py-2 px-3">
                       <div className="flex items-center gap-2">
-                        <div className="w-1 h-4 rounded-full" style={{ background: agentColor(project), opacity: 0.6 }} />
-                        <span className="text-white/70 truncate max-w-[160px]">{project}</span>
+                        <div className="w-1 h-4 rounded-full" style={{ background: agentColor(a.name), opacity: 0.6 }} />
+                        <span className="text-white/70 truncate max-w-[160px]">{a.name}</span>
                       </div>
                     </td>
-                    <td className="text-right py-2 px-3 text-indigo-400/70">{formatTokens(data.input)}</td>
-                    <td className="text-right py-2 px-3 text-pink-400/70">{formatTokens(data.output)}</td>
-                    <td className="text-right py-2 px-3 text-cyan-400/80 font-bold">{formatTokens(data.total)}</td>
-                    <td className="text-right py-2 px-3 text-amber-400/60">{formatCost(data.total)}</td>
-                    <td className="text-right py-2 px-3 text-white/30">{data.turns}</td>
+                    <td className="text-right py-2 px-3 text-indigo-400/70">{formatTokens(a.inputTokens)}</td>
+                    <td className="text-right py-2 px-3 text-pink-400/70">{formatTokens(a.outputTokens)}</td>
+                    <td className="text-right py-2 px-3 text-cyan-400/80 font-bold">{formatTokens(a.totalTokens)}</td>
+                    <td className="text-right py-2 px-3 text-amber-400/60">{formatUsd(a.estimatedCost)}</td>
+                    <td className="text-right py-2 px-3 text-white/30">{a.turns}</td>
                   </tr>
                 );
               })}

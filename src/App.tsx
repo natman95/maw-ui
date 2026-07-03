@@ -18,11 +18,8 @@ import { InboxOverlay } from "./components/InboxView";
 import { WorktreeView } from "./components/WorktreeView";
 import { ChatView } from "./components/ChatView";
 import { DashboardView } from "./components/DashboardView";
-import { SoulSyncDashboard } from "./components/SoulSyncDashboard";
 import { ProgressViewer } from "./components/ProgressViewer";
-import { MonitoringView } from "./components/MonitoringView";
 import { ConsciousnessView } from "./components/ConsciousnessView";
-import { ScheduleView } from "./components/ScheduleView";
 import { LoadingSkeleton } from "./components/LoadingSkeleton";
 import { ShortcutOverlay } from "./components/ShortcutOverlay";
 import { JumpOverlay } from "./components/JumpOverlay";
@@ -272,18 +269,10 @@ export function App() {
       if (e.key.toLowerCase() === "v" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         window.location.hash = "vs";
       }
-      if (e.key.toLowerCase() === "s" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        window.location.hash = "soul-sync";
-      }
       if (e.key.toLowerCase() === "p" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         window.location.hash = "progress";
       }
-      if (e.key.toLowerCase() === "m" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        window.location.hash = "monitoring";
-      }
-      if (e.key.toLowerCase() === "c" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        window.location.hash = "schedule";
-      }
+      // s/m/c shortcuts removed with the Sync/Monitor/Schedule dead views (2026-07-03).
       if (e.key.toLowerCase() === "i" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         setShowInbox(prev => !prev);
       }
@@ -508,13 +497,8 @@ export function App() {
     );
   }
 
-  if (route === "soul-sync") {
-    return (
-      <Layout activeView="soul-sync" {...layoutProps}>
-        <SoulSyncDashboard />
-      </Layout>
-    );
-  }
+  // soul-sync / monitoring / schedule routes removed 2026-07-03 — dead views with
+  // no backend in any maw-js build; unknown hashes fall through to office.
 
   if (route === "progress") {
     return (
@@ -524,26 +508,10 @@ export function App() {
     );
   }
 
-  if (route === "monitoring") {
-    return (
-      <Layout activeView="monitoring" {...layoutProps}>
-        <MonitoringView />
-      </Layout>
-    );
-  }
-
   if (route === "consciousness") {
     return (
       <Layout activeView="consciousness" {...layoutProps}>
         <ConsciousnessView />
-      </Layout>
-    );
-  }
-
-  if (route === "schedule") {
-    return (
-      <Layout activeView="schedule" {...layoutProps}>
-        <ScheduleView />
       </Layout>
     );
   }

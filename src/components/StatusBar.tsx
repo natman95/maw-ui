@@ -78,11 +78,12 @@ const NAV_ITEMS: NavItem[] = [
   { href: "#terminal", label: "Terminal", id: "terminal" },
   { href: "#chat", label: "Chat", id: "chat" },
   { href: "#teams", label: "Teams", id: "teams" },
-  { href: "#soul-sync", label: "Sync", id: "soul-sync" },
+  // Sync / Monitor / Schedule removed 2026-07-03 (Boss-ordered menu audit): their
+  // backing APIs (/api/fleet/soul-sync*, /api/monitoring/*, /api/schedule) never
+  // existed in ANY maw-js build (local or upstream), and upstream maw-ui deleted
+  // the three views outright. View files kept on disk per Nothing is Deleted.
   { href: "#progress", label: "Progress", id: "progress" },
-  { href: "#monitoring", label: "Monitor", id: "monitoring" },
   { href: "#consciousness", label: "🧠 Think", id: "consciousness" },
-  { href: "#schedule", label: "Schedule", id: "schedule" },
   { href: "#config", label: "Config", id: "config" },
   // External KB link — opens the (already auth-gated) TconHR guide hub in a new tab.
   // Absolute same-origin path → existing dashboard login cookie is sent → no re-login on mobile.

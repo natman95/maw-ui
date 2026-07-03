@@ -44,16 +44,23 @@ export const OracleSearch = memo(function OracleSearch({ onClose }: OracleSearch
   const [mode, setMode] = useState<"hybrid" | "fts" | "vector">("hybrid");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [traces, setTraces] = useState<Trace[]>([]);
+  // Fail-closed (2026-07-03): /api/oracle/* proxies to the arra-oracle service,
+  // which is not deployed on every node. When the mount probe fails, say so
+  // honestly and disable search — never a silent-empty modal that looks fine.
+  const [serviceDown, setServiceDown] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Load recent traces on mount
+  // Load recent traces on mount — doubles as the service reachability probe.
   useEffect(() => {
     inputRef.current?.focus();
     fetch(apiUrl("/api/oracle/traces?limit=8"))
-      .then((r) => r.json())
-      .then((data) => setTraces(data.traces || []))
-      .catch(() => {});
+      .then(async (r) => {
+        const data = await r.json();
+        if (!r.ok || data.error) { setServiceDown(true); return; }
+        setTraces(data.traces || []);
+      })
+      .catch(() => setServiceDown(true));
   }, []);
 
   const search = useCallback(async (q: string, m: string) => {
@@ -120,12 +127,13 @@ export const OracleSearch = memo(function OracleSearch({ onClose }: OracleSearch
             onKeyDown={handleKeyDown}
             className="flex-1 bg-transparent text-white/90 outline-none caret-[#64b5f6] font-mono text-sm [&::-webkit-search-cancel-button]:hidden [&::-webkit-clear-button]:hidden [&::-ms-clear]:hidden"
             style={{ WebkitAppearance: "none" }}
-            placeholder="Search Oracle knowledge..."
+            placeholder={serviceDown ? "search service not deployed" : "Search Oracle knowledge..."}
             inputMode="text"
             enterKeyHint="search"
             spellCheck={false}
             autoComplete="off"
             autoFocus
+            disabled={serviceDown}
           />
           {/* Mode toggle */}
           <div className="flex items-center gap-1">
@@ -146,7 +154,7 @@ export const OracleSearch = memo(function OracleSearch({ onClose }: OracleSearch
           </div>
           <button
             onClick={() => search(query, mode)}
-            disabled={loading}
+            disabled={loading || serviceDown}
             className="px-3 py-1.5 rounded-lg bg-[#64b5f6] text-black text-xs font-bold cursor-pointer hover:bg-[#90caf9] active:bg-[#42a5f5] transition-colors disabled:opacity-50"
           >
             {loading ? "..." : "Search"}
@@ -159,6 +167,14 @@ export const OracleSearch = memo(function OracleSearch({ onClose }: OracleSearch
             <span>{meta.total} results</span>
             {meta.mode && <span>mode: {meta.mode}</span>}
             {meta.model && <span>model: {meta.model}</span>}
+          </div>
+        )}
+
+        {/* Service not deployed — honest state, shown before any search attempt */}
+        {serviceDown && (
+          <div className="px-4 py-3 bg-amber-500/10 border-b border-amber-500/20 text-xs text-amber-300 font-mono leading-relaxed">
+            ⚠️ Oracle search service ยังไม่ได้ deploy บนเครื่องนี้ — เมนูค้นหาใช้ไม่ได้จนกว่าจะติดตั้ง arra-oracle service
+            <span className="block text-amber-300/50 mt-1">probe: /api/oracle/traces unreachable</span>
           </div>
         )}
 
