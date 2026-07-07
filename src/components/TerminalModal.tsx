@@ -37,8 +37,11 @@ export function TerminalModal({ agent, send, onClose, onNavigate, onSelectSiblin
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   }, []);
 
-  // 📎 attach: upload ANY file (image / pdf / word / excel / txt) to
-  // labubu-upload, then deliver its saved path to the running Oracle session.
+  // 📎 attach: upload files (image / pdf / word / excel / txt) to labubu-upload
+  // in ONE multipart request (repeated `file` fields — server accepts up to 10,
+  // MAX_FILES_PER_REQ), then deliver each saved path to the running Oracle
+  // session. Per-file save can partially fail (bad extension, oversize) — saved
+  // files still deliver; failures surface in the toast.
   // `kind:"chat"` routes the upload to /root/imports/maw-attach regardless of
   // type. Routes through the SAME shared-dashboard-WS `send` command
   // TerminalView uses ({type:"send", force:true}) — NOT the xterm PTY attach
@@ -50,30 +53,45 @@ export function TerminalModal({ agent, send, onClose, onNavigate, onSelectSiblin
   // every other file — the maw bridge's wake-stub regex matches both. The modal
   // only opens for a tracked agent (claude pane), so the target is always a
   // valid Oracle — no guard needed.
-  const uploadAttachment = useCallback(async (file: File) => {
+  const uploadAttachment = useCallback(async (files: File[]) => {
+    let batch = files;
+    if (batch.length > 10) {  // server MAX_FILES_PER_REQ — over-limit rejects the whole request
+      showToast("แนบได้สูงสุด 10 ไฟล์/ครั้ง — ส่งเฉพาะ 10 ไฟล์แรก", "warn");
+      batch = batch.slice(0, 10);
+    }
     setUploading(true);
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      for (const f of batch) fd.append("file", f);
       fd.append("kind", "chat");
       const res = await fetch("/upload/api/file", { method: "POST", credentials: "same-origin", body: fd });
       const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.success || !data?.saved?.length) {
-        const reason = data?.errors?.[0]?.reason || `HTTP ${res.status}`;
+      const saved: { path: string; original: string }[] = data?.saved ?? [];
+      const errors: { file: string; reason: string }[] = data?.errors ?? [];
+      if (!res.ok || saved.length === 0) {
+        const reason = errors[0]?.reason || `HTTP ${res.status}`;
         showToast(`อัปโหลดล้มเหลว: ${reason}`, "err");
         return;
       }
-      const path: string = data.saved[0].path;
-      const isImage = file.type.startsWith("image/");
-      const marker = isImage ? "ภาพแนบ" : "ไฟล์แนบ";
-      send({ type: "send", target: agent.target, text: `[${marker} — โปรดดู: ${path}]\n`, force: true });
-      showToast(isImage ? `ส่งภาพไปที่ ${agent.name} แล้ว` : `ส่งไฟล์ ${file.name} ไปที่ ${agent.name} แล้ว`, "ok");
+      // server echoes the client filename as `original` — key MIME lookup off it
+      const typeByName = new Map(batch.map(f => [f.name, f.type]));
+      for (const s of saved) {
+        const isImage = (typeByName.get(s.original) ?? "").startsWith("image/");
+        send({ type: "send", target: agent.target, text: `[${isImage ? "ภาพแนบ" : "ไฟล์แนบ"} — โปรดดู: ${s.path}]\n`, force: true });
+      }
+      const dir = saved[0].path.replace(/[^/]*$/, "");
+      const names = saved.map(s => s.original).join(", ");
+      if (errors.length) {
+        showToast(`แนบ ${saved.length}/${batch.length} ไฟล์ → ${dir} (${names}) — ล้มเหลว: ${errors.map(e => `${e.file} (${e.reason})`).join(", ")}`, "warn");
+      } else {
+        showToast(`แนบ ${saved.length} ไฟล์ → ${dir} — ${names}`, "ok");
+      }
     } catch {
       showToast("อัปโหลดล้มเหลว (network)", "err");
     } finally {
       setUploading(false);
     }
-  }, [agent.name, agent.target, send, showToast]);
+  }, [agent.target, send, showToast]);
 
   // Mobile-reachable composer. The dashboard pane embeds raw xterm.js, whose
   // internal helper-textarea never raises the soft keyboard on phones — so
@@ -172,11 +190,12 @@ export function TerminalModal({ agent, send, onClose, onNavigate, onSelectSiblin
             <input
               ref={fileInputRef}
               type="file"
+              multiple
               className="hidden"
               onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) uploadAttachment(f);
-                e.target.value = "";  // allow re-selecting the same file
+                const files = Array.from(e.target.files ?? []);
+                if (files.length) uploadAttachment(files);
+                e.target.value = "";  // allow re-selecting the same file(s)
               }}
             />
             <button
