@@ -85,9 +85,9 @@ const NAV_ITEMS: NavItem[] = [
   { href: "#progress", label: "Progress", id: "progress" },
   { href: "#consciousness", label: "🧠 Think", id: "consciousness" },
   { href: "#config", label: "Config", id: "config" },
-  // External KB link — opens the (already auth-gated) TconHR guide hub in a new tab.
-  // Absolute same-origin path → existing dashboard login cookie is sent → no re-login on mobile.
-  { href: "/maw/tconsiam/guides/tconhr.html", label: "📚 KB", id: "kb", external: true },
+  // External KB link — opens the (already auth-gated) TCONSIAM KB home in a new tab.
+  // Same-origin as the dashboard (/maw/) → existing login cookie is sent → no re-login on mobile.
+  { href: "https://arra.tconsiam.com/maw/tconsiam/", label: "📚 KB", id: "kb", external: true },
 ];
 
 const isTouch = typeof window !== "undefined" && ("ontouchstart" in window || navigator.maxTouchPoints > 0);
@@ -164,7 +164,7 @@ export const StatusBar = memo(function StatusBar({ connected, agentCount, sessio
               target="_blank"
               rel="noopener noreferrer"
               className="transition-colors whitespace-nowrap min-h-[44px] sm:min-h-0 px-1.5 sm:px-0 flex items-center text-amber-300/70 hover:text-amber-200"
-              title="TconHR KB guide (opens gated doc — same login)"
+              title="TCONSIAM KB (opens gated doc — same login)"
             >
               {item.label}
             </a>
