@@ -32,6 +32,20 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(s / 86400)}d`;
 }
 
+// Absolute date normalized to +07 from epoch — messages are authored in mixed
+// TZs (cross-node writes ISO-Z, local writes GMT+7), so the reader header shows
+// one consistent Bangkok wall-clock instead of the raw authored string.
+function formatBkk(dateStr: string): string {
+  const t = Date.parse(dateStr);
+  if (isNaN(t)) return dateStr || "";
+  const d = new Date(t).toLocaleString("en-GB", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric", month: "short", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  return `${d} +07`;
+}
+
 const TYPE_COLOR: Record<string, string> = {
   coordination: "#a855f7",
   "ship-report": "#4ecdc4",
@@ -206,7 +220,7 @@ export function MailView() {
           </Chip>
         ))}
         <Chip active={unreadOnly} onClick={() => setUnreadOnly((v) => !v)}>
-          unread{unreadCount ? ` (${unreadCount})` : ""}
+          unread{unreadCount ? ` (${unreadCount > 99 ? "99+" : unreadCount})` : ""}
         </Chip>
       </div>
 
@@ -261,7 +275,7 @@ export function MailView() {
                 <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: `${typeColor(selected.type)}22`, color: typeColor(selected.type) }}>
                   {selected.type}
                 </span>
-                <span className="ml-auto text-[11px] text-slate-500">{selected.date || timeAgo(selected.date)}</span>
+                <span className="ml-auto text-[11px] text-slate-500">{formatBkk(selected.date)}</span>
               </div>
               <div className="text-base font-semibold text-slate-100 mb-1">{selected.subject}</div>
               <div className="text-[10px] text-slate-600 mb-3">{selected.oracleHome} · {selected.file}</div>
