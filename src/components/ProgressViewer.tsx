@@ -1,6 +1,38 @@
-import { memo, useMemo, useRef, useEffect, useState, useCallback } from "react";
+import { memo, useMemo, useRef, useEffect, useState, useCallback, type ReactNode } from "react";
 import { agentColor, agentIcon } from "../lib/constants";
 import { describeActivity, type FeedEvent } from "../lib/feed";
+
+type TimeRange = "today" | "24h" | "7d" | "all";
+const TIME_RANGES: { key: TimeRange; label: string }[] = [
+  { key: "today", label: "วันนี้" },
+  { key: "24h", label: "24h" },
+  { key: "7d", label: "7d" },
+  { key: "all", label: "ทั้งหมด" },
+];
+
+function timeRangeStart(range: TimeRange): number {
+  if (range === "all") return 0;
+  if (range === "24h") return Date.now() - 24 * 3600_000;
+  if (range === "7d") return Date.now() - 7 * 24 * 3600_000;
+  // today = local midnight (feed ts are +07 epoch ms; dashboard runs in BKK)
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function Chip({ children, active, onClick, color }: { children: ReactNode; active: boolean; onClick: () => void; color?: string }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`font-mono text-[11px] px-2.5 py-1 rounded-full border transition-colors min-h-[32px] ${
+        active ? "border-white/30 bg-white/10 text-slate-100" : "border-white/10 text-slate-400 hover:text-slate-200"
+      }`}
+      style={active && color ? { borderColor: color, color } : undefined}
+    >
+      {children}
+    </button>
+  );
+}
 
 const EVENT_LABELS: Record<string, { icon: string; label: string; color: string }> = {
   PreToolUse: { icon: "🔧", label: "Tool call", color: "#fbbf24" },
@@ -124,6 +156,18 @@ const OracleTimeline = memo(function OracleTimeline({
 export function ProgressViewer({ feedEvents }: { feedEvents: FeedEvent[] }) {
   const [expandedOracles, setExpandedOracles] = useState<Set<string>>(new Set());
 
+  // --- search + filter state ---
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [oracleFilter, setOracleFilter] = useState<string | null>(null);
+  const [eventFilter, setEventFilter] = useState<string | null>(null);
+  const [timeRange, setTimeRange] = useState<TimeRange>("all");
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query.trim().toLowerCase()), 200);
+    return () => clearTimeout(t);
+  }, [query]);
+
   const toggleOracle = useCallback((oracle: string) => {
     setExpandedOracles((prev) => {
       const next = new Set(prev);
@@ -133,9 +177,43 @@ export function ProgressViewer({ feedEvents }: { feedEvents: FeedEvent[] }) {
     });
   }, []);
 
+  // Chip option lists derived from the FULL feed so they stay stable while filtering
+  const { oracleOptions, eventOptions } = useMemo(() => {
+    const os = new Set<string>();
+    const es = new Set<string>();
+    for (const e of feedEvents) {
+      os.add(e.oracle);
+      es.add(e.event);
+    }
+    return { oracleOptions: [...os].sort(), eventOptions: [...es] };
+  }, [feedEvents]);
+
+  const filteredEvents = useMemo(() => {
+    const start = timeRangeStart(timeRange);
+    return feedEvents.filter((e) => {
+      if (oracleFilter && e.oracle !== oracleFilter) return false;
+      if (eventFilter && e.event !== eventFilter) return false;
+      if (start && (e.ts || 0) < start) return false;
+      if (debouncedQuery) {
+        const hay = `${e.message} ${e.project} ${e.oracle}`.toLowerCase();
+        if (!hay.includes(debouncedQuery)) return false;
+      }
+      return true;
+    });
+  }, [feedEvents, oracleFilter, eventFilter, timeRange, debouncedQuery]);
+
+  const filtersActive = !!(debouncedQuery || oracleFilter || eventFilter || timeRange !== "all");
+  const clearFilters = useCallback(() => {
+    setQuery("");
+    setDebouncedQuery("");
+    setOracleFilter(null);
+    setEventFilter(null);
+    setTimeRange("all");
+  }, []);
+
   const groups = useMemo(() => {
     const map = new Map<string, FeedEvent[]>();
-    for (const e of feedEvents) {
+    for (const e of filteredEvents) {
       const arr = map.get(e.oracle) || [];
       arr.push(e);
       map.set(e.oracle, arr);
@@ -154,16 +232,17 @@ export function ProgressViewer({ feedEvents }: { feedEvents: FeedEvent[] }) {
     }
 
     return result.sort((a, b) => b.lastActive - a.lastActive);
-  }, [feedEvents]);
+  }, [filteredEvents]);
 
-  // Auto-expand the most recently active oracle
+  // Auto-expand the most recently active oracle (first non-empty render only)
   useEffect(() => {
-    if (groups.length > 0 && expandedOracles.size === 0) {
-      setExpandedOracles(new Set([groups[0].oracle]));
+    if (feedEvents.length > 0 && expandedOracles.size === 0) {
+      setExpandedOracles(new Set(groups.length > 0 ? [groups[0].oracle] : []));
     }
-  }, [groups.length > 0]); // only on first non-empty render
+  }, [feedEvents.length > 0]);
 
-  if (groups.length === 0) {
+  // No feed at all → the original empty state
+  if (feedEvents.length === 0) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
         <div className="text-center">
@@ -175,15 +254,16 @@ export function ProgressViewer({ feedEvents }: { feedEvents: FeedEvent[] }) {
     );
   }
 
-  const allExpanded = groups.every((g) => expandedOracles.has(g.oracle));
+  const allExpanded = groups.length > 0 && groups.every((g) => expandedOracles.has(g.oracle));
 
   return (
     <div className="px-3 sm:px-6 py-4 sm:py-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-4 sm:mb-6">
+      <div className="flex items-center justify-between mb-3 sm:mb-4">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold font-mono" style={{ color: "#e2e8f0" }}>Progress</h1>
           <p className="font-mono text-[10px] sm:text-xs mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>
-            {groups.length} oracle{groups.length !== 1 ? "s" : ""} · {feedEvents.length} events
+            {groups.length} oracle{groups.length !== 1 ? "s" : ""} ·{" "}
+            {filtersActive ? `${filteredEvents.length} / ${feedEvents.length}` : feedEvents.length} events
           </p>
         </div>
         <button
@@ -198,16 +278,94 @@ export function ProgressViewer({ feedEvents }: { feedEvents: FeedEvent[] }) {
         </button>
       </div>
 
-      <div className="space-y-3 sm:space-y-4">
-        {groups.map((group) => (
-          <OracleTimeline
-            key={group.oracle}
-            group={group}
-            expanded={expandedOracles.has(group.oracle)}
-            onToggle={() => toggleOracle(group.oracle)}
+      {/* search + filter controls */}
+      <div className="flex flex-col gap-2 mb-4 sm:mb-6">
+        <div className="relative">
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="ค้นหา message / project / oracle…"
+            className="w-full font-mono text-xs sm:text-sm rounded-lg bg-white/[0.03] border border-white/10 text-slate-100 placeholder:text-slate-500 pl-3 pr-8 py-2 min-h-[40px] focus:outline-none focus:border-white/25 transition-colors"
           />
-        ))}
+          {query && (
+            <button
+              onClick={() => setQuery("")}
+              aria-label="clear search"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-100 hover:bg-white/10 transition-colors"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* time range */}
+        <div className="flex flex-wrap gap-1.5">
+          {TIME_RANGES.map((r) => (
+            <Chip key={r.key} active={timeRange === r.key} onClick={() => setTimeRange(r.key)}>
+              {r.label}
+            </Chip>
+          ))}
+        </div>
+
+        {/* per-oracle */}
+        <div className="flex flex-wrap gap-1.5">
+          {oracleOptions.map((o) => (
+            <Chip
+              key={o}
+              active={oracleFilter === o}
+              color={agentColor(o + "-oracle")}
+              onClick={() => setOracleFilter(oracleFilter === o ? null : o)}
+            >
+              {o}
+            </Chip>
+          ))}
+        </div>
+
+        {/* event type */}
+        <div className="flex flex-wrap gap-1.5">
+          {eventOptions.map((ev) => {
+            const cfg = EVENT_LABELS[ev];
+            return (
+              <Chip
+                key={ev}
+                active={eventFilter === ev}
+                color={cfg?.color}
+                onClick={() => setEventFilter(eventFilter === ev ? null : ev)}
+              >
+                {cfg ? `${cfg.icon} ${cfg.label}` : ev}
+              </Chip>
+            );
+          })}
+        </div>
       </div>
+
+      {groups.length === 0 ? (
+        <div className="flex items-center justify-center h-[40vh]">
+          <div className="text-center">
+            <div className="text-3xl mb-3">🔍</div>
+            <p className="font-mono text-sm" style={{ color: "rgba(255,255,255,0.4)" }}>ไม่พบเหตุการณ์ที่ตรงกับตัวกรอง</p>
+            <button
+              onClick={clearFilters}
+              className="font-mono text-xs mt-3 px-3 py-1.5 rounded-lg transition-colors hover:bg-white/[0.06] min-h-[40px]"
+              style={{ color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.15)" }}
+            >
+              ล้างตัวกรอง
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3 sm:space-y-4">
+          {groups.map((group) => (
+            <OracleTimeline
+              key={group.oracle}
+              group={group}
+              expanded={expandedOracles.has(group.oracle)}
+              onToggle={() => toggleOracle(group.oracle)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
