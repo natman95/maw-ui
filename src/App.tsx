@@ -20,6 +20,7 @@ import { ChatView } from "./components/ChatView";
 import { DashboardView } from "./components/DashboardView";
 import { ProgressViewer } from "./components/ProgressViewer";
 import { ConsciousnessView } from "./components/ConsciousnessView";
+import { MailView } from "./components/MailView";
 import { LoadingSkeleton } from "./components/LoadingSkeleton";
 import { ShortcutOverlay } from "./components/ShortcutOverlay";
 import { JumpOverlay } from "./components/JumpOverlay";
@@ -512,6 +513,14 @@ export function App() {
     return (
       <Layout activeView="consciousness" {...layoutProps}>
         <ConsciousnessView />
+      </Layout>
+    );
+  }
+
+  if (route === "mail") {
+    return (
+      <Layout activeView="mail" {...layoutProps}>
+        <MailView />
       </Layout>
     );
   }
