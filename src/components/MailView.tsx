@@ -173,6 +173,21 @@ export function MailView() {
   const oracles = useMemo(() => [...new Set(items.map((m) => m.oracleHome))].sort(), [items]);
   const unreadCount = useMemo(() => items.filter((m) => !m.read).length, [items]);
 
+  // Clear the whole unread backlog in one tap (Boss-decided). Optimistic, then
+  // reload to reconcile with server truth — a message the server can't stamp
+  // (no editable frontmatter) honestly re-appears unread rather than faking 0.
+  const markAllRead = useCallback(async () => {
+    if (unreadCount === 0) return;
+    setItems((xs) => xs.map((x) => ({ ...x, read: true }))); // optimistic
+    try {
+      await apiFetch("/api/psi-mail/mark-read-all", { method: "POST", body: "{}" });
+    } catch {
+      // swallow — the reconcile below restores real state on failure too
+    } finally {
+      load();
+    }
+  }, [unreadCount, load]);
+
   const filtered = useMemo(() => items.filter((m) => {
     if (oracleFilter && m.oracleHome !== oracleFilter) return false;
     if (unreadOnly && m.read) return false;
@@ -222,6 +237,9 @@ export function MailView() {
         <Chip active={unreadOnly} onClick={() => setUnreadOnly((v) => !v)}>
           unread{unreadCount ? ` (${unreadCount > 99 ? "99+" : unreadCount})` : ""}
         </Chip>
+        {unreadCount > 0 && (
+          <Chip active={false} onClick={markAllRead}>✓ mark all read</Chip>
+        )}
       </div>
 
       <div className="flex flex-col md:flex-row gap-4" style={{ minHeight: "60vh" }}>
