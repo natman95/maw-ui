@@ -21,6 +21,7 @@ import { DashboardView } from "./components/DashboardView";
 import { ProgressViewer } from "./components/ProgressViewer";
 import { ConsciousnessView } from "./components/ConsciousnessView";
 import { MailView } from "./components/MailView";
+import { OpsView } from "./components/OpsView";
 import { LoadingSkeleton } from "./components/LoadingSkeleton";
 import { ShortcutOverlay } from "./components/ShortcutOverlay";
 import { JumpOverlay } from "./components/JumpOverlay";
@@ -521,6 +522,14 @@ export function App() {
     return (
       <Layout activeView="mail" {...layoutProps}>
         <MailView />
+      </Layout>
+    );
+  }
+
+  if (route === "ops") {
+    return (
+      <Layout activeView="ops" {...layoutProps}>
+        <OpsView />
       </Layout>
     );
   }
