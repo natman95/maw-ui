@@ -10,8 +10,11 @@ import type { AgentState, Session, AgentEvent } from "../lib/types";
 // ─── Token types ────────────────────────────────────────────────────
 // Rewired 2026-07-03: /api/tokens went 410 Gone (sunset 2026-05-01) — the panel
 // silently showed empty data for two months. /api/costs is the live replacement
-// (per-agent aggregates incl. a REAL estimatedCost from the backend, replacing
-// the old blended-rate guess).
+// (per-agent token/session aggregates). NOTE 2026-07-19 (F3): the $ estimatedCost
+// is deliberately NOT shown — this box runs on a subscription, so an API-list
+// price mis-reads workload. We surface real-work axes instead (output/turns/
+// sessions/lastActive); cache-read is shown muted, off the workload axis.
+// The `estimatedCost` field remains in the payload/type but is intentionally unrendered.
 interface CostAgent {
   name: string;
   inputTokens: number;
@@ -31,12 +34,6 @@ function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return `${n}`;
-}
-
-function formatUsd(cost: number): string {
-  if (cost < 0.01) return "<$0.01";
-  if (cost < 100) return `$${cost.toFixed(2)}`;
-  return `$${Math.round(cost).toLocaleString()}`;
 }
 
 function timeAgo(ts: number): string {
@@ -230,35 +227,46 @@ function TokenTracking() {
   );
 
   const grandTotal = useMemo(() => agents.reduce((acc, a) => acc + a.totalTokens, 0), [agents]);
-  const grandInput = useMemo(() => agents.reduce((acc, a) => acc + a.inputTokens, 0), [agents]);
   const grandOutput = useMemo(() => agents.reduce((acc, a) => acc + a.outputTokens, 0), [agents]);
-  const grandCost = useMemo(() => agents.reduce((acc, a) => acc + a.estimatedCost, 0), [agents]);
+  const grandInput = useMemo(() => agents.reduce((acc, a) => acc + a.inputTokens, 0), [agents]);
+  const grandCacheRead = useMemo(() => agents.reduce((acc, a) => acc + a.cacheReadTokens, 0), [agents]);
   const totalSessions = useMemo(() => agents.reduce((acc, a) => acc + a.sessions, 0), [agents]);
+  const totalTurns = useMemo(() => agents.reduce((acc, a) => acc + a.turns, 0), [agents]);
 
   return (
     <div className="space-y-4">
-      <h2 className="text-sm font-bold tracking-widest text-white/60 uppercase px-1">Tokens</h2>
-
-      {/* Totals (Burn Rate card retired with /api/tokens/rate — no live backing data) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label="Cost" value={formatUsd(grandCost)} accent="#fbbf24" sub="backend estimate" />
-        <StatCard label="Total" value={formatTokens(grandTotal)} accent="#22d3ee" sub={`${byProject.length} projects`} />
-        <StatCard label="Input" value={formatTokens(grandInput)} accent="#818cf8" sub={`${totalSessions} sessions`} />
-        <StatCard label="Output" value={formatTokens(grandOutput)} accent="#f472b6" />
+      <div className="flex items-baseline gap-2 px-1">
+        <h2 className="text-sm font-bold tracking-widest text-white/60 uppercase">Workload</h2>
+        <span className="text-[10px] text-white/25 font-mono">ภาระงานจริง · ไม่ใช่ค่าใช้จ่าย</span>
       </div>
 
-      {/* By project table */}
+      {/* Real-workload totals — output = งานจริง (generated). NO $: this box runs on
+          a subscription, so an API-list-price "cost" mis-reads workload (F3, 07-19). */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <StatCard label="Output" value={formatTokens(grandOutput)} accent="#f472b6" sub="งานจริง (generated)" />
+        <StatCard label="Total" value={formatTokens(grandTotal)} accent="#22d3ee" sub={`${byProject.length} projects`} />
+        <StatCard label="Sessions" value={`${totalSessions}`} accent="#818cf8" sub={`${totalTurns} turns`} />
+        <StatCard label="Input" value={formatTokens(grandInput)} accent="#4ecdc4" />
+      </div>
+
+      {/* cache-read: muted, kept OFF the workload axis — it's subscription cache reuse,
+          not real money and not real work (F3). */}
+      <div className="text-[11px] text-white/25 font-mono px-1">
+        cache-read {formatTokens(grandCacheRead)} — subscription (ไม่ใช่เงินจริง · ไม่นับเป็นภาระงาน)
+      </div>
+
+      {/* Per-oracle real-workload table (F3): output · turns · sessions · last active. */}
       {!loading && byProject.length > 0 && (
-        <div className="rounded-xl border border-white/[0.06] overflow-hidden">
+        <div className="rounded-xl border border-white/[0.06] overflow-hidden overflow-x-auto">
           <table className="w-full text-xs font-mono">
             <thead>
               <tr className="text-white/30 border-b border-white/[0.06]">
-                <th className="text-left py-2 px-3 font-normal">Project</th>
-                <th className="text-right py-2 px-3 font-normal">Input</th>
+                <th className="text-left py-2 px-3 font-normal">Oracle / Project</th>
                 <th className="text-right py-2 px-3 font-normal">Output</th>
                 <th className="text-right py-2 px-3 font-normal">Total</th>
-                <th className="text-right py-2 px-3 font-normal">Cost</th>
                 <th className="text-right py-2 px-3 font-normal">Turns</th>
+                <th className="text-right py-2 px-3 font-normal">Sessions</th>
+                <th className="text-right py-2 px-3 font-normal">Last active</th>
               </tr>
             </thead>
             <tbody>
@@ -271,11 +279,11 @@ function TokenTracking() {
                         <span className="text-white/70 truncate max-w-[160px]">{a.name}</span>
                       </div>
                     </td>
-                    <td className="text-right py-2 px-3 text-indigo-400/70">{formatTokens(a.inputTokens)}</td>
                     <td className="text-right py-2 px-3 text-pink-400/70">{formatTokens(a.outputTokens)}</td>
                     <td className="text-right py-2 px-3 text-cyan-400/80 font-bold">{formatTokens(a.totalTokens)}</td>
-                    <td className="text-right py-2 px-3 text-amber-400/60">{formatUsd(a.estimatedCost)}</td>
-                    <td className="text-right py-2 px-3 text-white/30">{a.turns}</td>
+                    <td className="text-right py-2 px-3 text-white/40">{a.turns}</td>
+                    <td className="text-right py-2 px-3 text-indigo-400/70">{a.sessions}</td>
+                    <td className="text-right py-2 px-3 text-white/25">{a.lastActive ? timeAgo(Date.parse(a.lastActive)) : "—"}</td>
                   </tr>
                 );
               })}
@@ -283,7 +291,7 @@ function TokenTracking() {
           </table>
         </div>
       )}
-      {loading && <div className="text-xs text-white/20 font-mono px-1">Loading token data...</div>}
+      {loading && <div className="text-xs text-white/20 font-mono px-1">Loading workload data...</div>}
     </div>
   );
 }
