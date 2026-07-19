@@ -77,6 +77,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "#overview", label: "Overview", id: "overview" },
   { href: "#terminal", label: "Terminal", id: "terminal" },
   { href: "#chat", label: "Chat", id: "chat" },
+  { href: "#mail", label: "✉️ Mail", id: "mail" },
   { href: "#teams", label: "Teams", id: "teams" },
   // Sync / Monitor / Schedule removed 2026-07-03 (Boss-ordered menu audit): their
   // backing APIs (/api/fleet/soul-sync*, /api/monitoring/*, /api/schedule) never
