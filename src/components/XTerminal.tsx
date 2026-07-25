@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -13,6 +13,24 @@ interface XTerminalProps {
   onSelectSibling: (agent: AgentState) => void;
   readOnly?: boolean;
 }
+
+// Imperative handle so the chrome (TerminalModal) can inject text into the PTY
+// without owning the WebSocket — used by the 📎 attach button to type a saved
+// image path into the running Oracle, mirroring TerminalView's queueSend path.
+export interface XTerminalHandle {
+  inject: (text: string) => void;
+}
+
+const enc = new TextEncoder();
+
+// WebSocket reconnect backoff (mirrors useWebSocket.ts) — exponential 1s → 30s.
+const BASE_DELAY = 1000;
+const MAX_DELAY = 30000;
+
+// "At bottom" tolerance in CSS px. Smaller than one row (~18px) so a deliberate
+// one-line scroll-up reads as not-at-bottom, but large enough to absorb
+// sub-pixel rounding during active tailing.
+const AT_BOTTOM_EPS_PX = 8;
 
 // Catppuccin Mocha palette (matches AC array in ansi.ts)
 const THEME = {
@@ -39,8 +57,29 @@ const THEME = {
   brightWhite: "#ffffff",
 };
 
-export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibling, readOnly = false }: XTerminalProps) {
+export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XTerminal(
+  { target, onClose, onNavigate, siblings, onSelectSibling, readOnly = false },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // Connection state for the disconnect badge. XTerminal rolls its own PTY
+  // socket (not the useWebSocket hook), so it also needs its own reconnect and a
+  // visible indicator — a frozen last-frame must NEVER be mistaken for live output.
+  const [connState, setConnState] = useState<"connecting" | "open" | "reconnecting">("connecting");
+  // Assigned inside the effect so the badge's tap-to-reconnect can force a retry.
+  const reconnectNowRef = useRef<() => void>(() => {});
+
+  // Inject text into the live PTY as if typed. `\r` submits (xterm sends CR on
+  // Enter). No-op in read-only mode or when the socket isn't open.
+  useImperativeHandle(ref, () => ({
+    inject: (text: string) => {
+      const ws = wsRef.current;
+      if (readOnly || !ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(enc.encode(text));
+    },
+  }), [readOnly]);
 
   // Keep callbacks in refs so terminal effect doesn't re-run on every render
   const onCloseRef = useRef(onClose);
@@ -64,16 +103,50 @@ export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibli
       cursorBlink: !readOnly,
       cursorStyle: readOnly ? "underline" : "bar",
       disableStdin: readOnly,
+      // Deeper history so there's something to scroll *into*. claude's Ink TUI
+      // renders to the normal buffer (not alt-screen), so past output scrolls
+      // up as real scrollback; the 1000-line default truncated long sessions.
+      scrollback: 5000,
     });
 
     const fit = new FitAddon();
     term.loadAddon(fit);
 
     let ws: WebSocket | null = null;
+    let viewportEl: HTMLElement | null = null;
     let dataSub: { dispose: () => void } | null = null;
     let binSub: { dispose: () => void } | null = null;
     let resizeTimer: ReturnType<typeof setTimeout>;
     let resizeObserver: ResizeObserver | null = null;
+    // Reconnect bookkeeping (effect-scoped so cleanup can cancel a pending retry).
+    let alive = true;
+    let attempt = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+    // Follow-tail = plain standard-terminal / tmux semantics: tail at the
+    // bottom, stay put when scrolled up, resume tailing when the user returns.
+    // No mode, no lock, no button.
+    //
+    // The source of truth for "is the user at the bottom" is the DOM
+    // .xterm-viewport (scrollHeight − scrollTop − clientHeight ≤ EPS), read
+    // synchronously before each write — NOT xterm's buffer.viewportY.
+    //
+    // Why not viewportY: xterm only updates viewportY / its internal
+    // isUserScrolling flag from the DOM 'scroll' event, and browsers dispatch
+    // scroll events asynchronously (next frame). On mobile, a touch-drag changes
+    // .xterm-viewport.scrollTop instantly but xterm's state lags a frame; claude
+    // streams several writes/sec, so a write lands in that stale window while
+    // isUserScrolling is still false → xterm's auto-follow (BufferService.scroll:
+    // `isUserScrolling || ydisp++`) yanks the viewport to the new bottom. That is
+    // the "drag up, snaps back immediately" bounce — and it lives in xterm's own
+    // render, which is why the previous stick-flag fixes (callback layer) missed.
+    //
+    // Fix: read the DOM before each write. If the user is scrolled up there but
+    // xterm still thinks it's at the bottom, sync xterm to the DOM *now*
+    // (scrollToLine flips isUserScrolling synchronously) so the upcoming write
+    // can't auto-follow. The explicit scrollToBottom (gated on DOM-at-bottom) is
+    // still needed because the attach replay + tmux redraw land the viewport
+    // off-bottom, defeating xterm's at-baseY auto-stick.
 
     // Defer open until container has dimensions (avoids "dimensions" crash on first render)
     const openTimer = setTimeout(() => {
@@ -83,40 +156,90 @@ export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibli
         term.focus();
       } catch { return; }
 
-      // Connect to PTY WebSocket
-      ws = new WebSocket(wsUrl("/ws/pty"));
-      ws.binaryType = "arraybuffer";
+      // Connect to the PTY WebSocket. Wrapped in connect() so a dropped socket
+      // auto-reconnects (exponential backoff) instead of freezing on the last
+      // frame; connState drives the "disconnected — tap to reconnect" badge.
+      const connect = () => {
+        if (!alive) return;
+        const socket = new WebSocket(wsUrl("/ws/pty"));
+        socket.binaryType = "arraybuffer";
+        ws = socket;
+        wsRef.current = socket;
 
-      ws.onopen = () => {
-        ws!.send(JSON.stringify({
-          type: "attach",
-          target,
-          cols: term.cols,
-          rows: term.rows,
-        }));
-      };
+        socket.onopen = () => {
+          attempt = 0;
+          setConnState("open");
+          socket.send(JSON.stringify({
+            type: "attach",
+            target,
+            cols: term.cols,
+            rows: term.rows,
+          }));
+        };
 
-      ws.onmessage = (e) => {
+        socket.onmessage = (e) => {
         if (typeof e.data === "string") {
           try {
             const msg = JSON.parse(e.data);
             if (msg.type === "attached") {
               // Fit terminal to container — server ignores resize for grouped sessions
               try { fit.fit(); } catch {}
+              // Start tailing from a known at-bottom baseline once the replay +
+              // redraw settle (the attach leaves the viewport off-bottom). The
+              // user hasn't scrolled yet at attach time, so this is unconditional.
+              requestAnimationFrame(() => {
+                try { term.scrollToBottom(); } catch {}
+              });
             }
             if (msg.type === "detached") {
               term.write("\r\n\x1b[33m[session detached]\x1b[0m\r\n");
             }
           } catch {}
         } else {
-          // Binary PTY data → render in xterm.js
-          term.write(new Uint8Array(e.data));
+          // Binary PTY data → render in xterm.js. Decide tail-vs-stay from the
+          // DOM viewport (the user's real position this instant), not xterm's
+          // frame-lagged viewportY — see the block comment above.
+          const b = term.buffer.active;
+          const vp = viewportEl ?? (viewportEl = container.querySelector(".xterm-viewport"));
+          let atBottom = b.viewportY >= b.baseY - 1; // fallback if DOM not ready
+          if (vp) {
+            atBottom = vp.scrollHeight - vp.scrollTop - vp.clientHeight <= AT_BOTTOM_EPS_PX;
+            // Stale window: DOM is scrolled up but xterm's state still reads
+            // at-bottom (its async scroll event hasn't fired). Sync xterm to the
+            // DOM now so the write below cannot auto-follow and bounce the user.
+            if (!atBottom && b.viewportY >= b.baseY - 1 && b.length > 0) {
+              const rowH = vp.scrollHeight / b.length;
+              const targetLine = Math.max(0, Math.min(b.baseY, Math.round(vp.scrollTop / rowH)));
+              try { term.scrollToLine(targetLine); } catch {}
+            }
+          }
+          term.write(new Uint8Array(e.data), () => {
+            if (atBottom) { try { term.scrollToBottom(); } catch {} }
+          });
         }
       };
 
-      ws.onclose = () => {
-        term.write("\r\n\x1b[31m[connection closed]\x1b[0m\r\n");
+        socket.onclose = () => {
+          if (!alive) return;
+          setConnState("reconnecting");
+          term.write("\r\n\x1b[33m[reconnecting…]\x1b[0m\r\n");
+          const delay = Math.min(BASE_DELAY * 2 ** attempt, MAX_DELAY);
+          attempt++;
+          reconnectTimer = setTimeout(connect, delay);
+        };
+
+        socket.onerror = () => socket.close();
       };
+
+      // Tap-to-reconnect on the badge: cancel any pending backoff and retry now.
+      reconnectNowRef.current = () => {
+        clearTimeout(reconnectTimer);
+        attempt = 0;
+        setConnState("connecting");
+        connect();
+      };
+
+      connect();
 
       if (!readOnly) {
         // Keystrokes → binary to PTY stdin
@@ -166,15 +289,31 @@ export function XTerminal({ target, onClose, onNavigate, siblings, onSelectSibli
     }, 50);
 
     return () => {
+      alive = false;
       clearTimeout(openTimer);
       clearTimeout(resizeTimer);
+      clearTimeout(reconnectTimer);
       resizeObserver?.disconnect();
       dataSub?.dispose();
       binSub?.dispose();
       ws?.close();
+      if (wsRef.current === ws) wsRef.current = null;
       term.dispose();
     };
   }, [target]);
 
-  return <div ref={containerRef} className="w-full h-full" />;
-}
+  return (
+    <div className="relative w-full h-full">
+      <div ref={containerRef} className="w-full h-full" />
+      {connState !== "open" && (
+        <button
+          type="button"
+          onClick={() => reconnectNowRef.current()}
+          className="absolute top-2 left-1/2 -translate-x-1/2 z-10 rounded px-3 py-1 text-xs font-medium text-white shadow-lg bg-red-600/90 hover:bg-red-600"
+        >
+          {connState === "reconnecting" ? "🔴 หลุด — แตะเพื่อต่อใหม่" : "⏳ กำลังเชื่อมต่อ…"}
+        </button>
+      )}
+    </div>
+  );
+});
