@@ -1,4 +1,4 @@
-import { useEffect, useRef, forwardRef, useImperativeHandle } from "react";
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -22,6 +22,10 @@ export interface XTerminalHandle {
 }
 
 const enc = new TextEncoder();
+
+// WebSocket reconnect backoff (mirrors useWebSocket.ts) — exponential 1s → 30s.
+const BASE_DELAY = 1000;
+const MAX_DELAY = 30000;
 
 // "At bottom" tolerance in CSS px. Smaller than one row (~18px) so a deliberate
 // one-line scroll-up reads as not-at-bottom, but large enough to absorb
@@ -59,6 +63,13 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Connection state for the disconnect badge. XTerminal rolls its own PTY
+  // socket (not the useWebSocket hook), so it also needs its own reconnect and a
+  // visible indicator — a frozen last-frame must NEVER be mistaken for live output.
+  const [connState, setConnState] = useState<"connecting" | "open" | "reconnecting">("connecting");
+  // Assigned inside the effect so the badge's tap-to-reconnect can force a retry.
+  const reconnectNowRef = useRef<() => void>(() => {});
 
   // Inject text into the live PTY as if typed. `\r` submits (xterm sends CR on
   // Enter). No-op in read-only mode or when the socket isn't open.
@@ -107,6 +118,10 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
     let binSub: { dispose: () => void } | null = null;
     let resizeTimer: ReturnType<typeof setTimeout>;
     let resizeObserver: ResizeObserver | null = null;
+    // Reconnect bookkeeping (effect-scoped so cleanup can cancel a pending retry).
+    let alive = true;
+    let attempt = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
     // Follow-tail = plain standard-terminal / tmux semantics: tail at the
     // bottom, stay put when scrolled up, resume tailing when the user returns.
@@ -141,21 +156,28 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
         term.focus();
       } catch { return; }
 
-      // Connect to PTY WebSocket
-      ws = new WebSocket(wsUrl("/ws/pty"));
-      ws.binaryType = "arraybuffer";
-      wsRef.current = ws;
+      // Connect to the PTY WebSocket. Wrapped in connect() so a dropped socket
+      // auto-reconnects (exponential backoff) instead of freezing on the last
+      // frame; connState drives the "disconnected — tap to reconnect" badge.
+      const connect = () => {
+        if (!alive) return;
+        const socket = new WebSocket(wsUrl("/ws/pty"));
+        socket.binaryType = "arraybuffer";
+        ws = socket;
+        wsRef.current = socket;
 
-      ws.onopen = () => {
-        ws!.send(JSON.stringify({
-          type: "attach",
-          target,
-          cols: term.cols,
-          rows: term.rows,
-        }));
-      };
+        socket.onopen = () => {
+          attempt = 0;
+          setConnState("open");
+          socket.send(JSON.stringify({
+            type: "attach",
+            target,
+            cols: term.cols,
+            rows: term.rows,
+          }));
+        };
 
-      ws.onmessage = (e) => {
+        socket.onmessage = (e) => {
         if (typeof e.data === "string") {
           try {
             const msg = JSON.parse(e.data);
@@ -197,9 +219,27 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
         }
       };
 
-      ws.onclose = () => {
-        term.write("\r\n\x1b[31m[connection closed]\x1b[0m\r\n");
+        socket.onclose = () => {
+          if (!alive) return;
+          setConnState("reconnecting");
+          term.write("\r\n\x1b[33m[reconnecting…]\x1b[0m\r\n");
+          const delay = Math.min(BASE_DELAY * 2 ** attempt, MAX_DELAY);
+          attempt++;
+          reconnectTimer = setTimeout(connect, delay);
+        };
+
+        socket.onerror = () => socket.close();
       };
+
+      // Tap-to-reconnect on the badge: cancel any pending backoff and retry now.
+      reconnectNowRef.current = () => {
+        clearTimeout(reconnectTimer);
+        attempt = 0;
+        setConnState("connecting");
+        connect();
+      };
+
+      connect();
 
       if (!readOnly) {
         // Keystrokes → binary to PTY stdin
@@ -249,8 +289,10 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
     }, 50);
 
     return () => {
+      alive = false;
       clearTimeout(openTimer);
       clearTimeout(resizeTimer);
+      clearTimeout(reconnectTimer);
       resizeObserver?.disconnect();
       dataSub?.dispose();
       binSub?.dispose();
@@ -260,5 +302,18 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
     };
   }, [target]);
 
-  return <div ref={containerRef} className="w-full h-full" />;
+  return (
+    <div className="relative w-full h-full">
+      <div ref={containerRef} className="w-full h-full" />
+      {connState !== "open" && (
+        <button
+          type="button"
+          onClick={() => reconnectNowRef.current()}
+          className="absolute top-2 left-1/2 -translate-x-1/2 z-10 rounded px-3 py-1 text-xs font-medium text-white shadow-lg bg-red-600/90 hover:bg-red-600"
+        >
+          {connState === "reconnecting" ? "🔴 หลุด — แตะเพื่อต่อใหม่" : "⏳ กำลังเชื่อมต่อ…"}
+        </button>
+      )}
+    </div>
+  );
 });
