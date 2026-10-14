@@ -18,7 +18,17 @@ export function UniverseBg() {
     camera.position.set(0, 2, 20);
     camera.lookAt(0, 0, 0);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false });
+    // Decorative only — if the browser refuses a WebGL context (phones with many
+    // tabs, GPU blocklist) fall back to the solid scene colour instead of throwing
+    // into the ErrorBoundary, which would replace the whole app.
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false });
+    } catch (err) {
+      console.warn("[UniverseBg] WebGL unavailable, using solid background", err);
+      el.style.background = "#020208";
+      return;
+    }
     renderer.setSize(w, h);
     renderer.setPixelRatio(1); // Cap at 1x for performance
     el.appendChild(renderer.domElement);
