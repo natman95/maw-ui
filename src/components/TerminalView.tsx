@@ -1,4 +1,4 @@
-import { memo, useState, useEffect, useRef, useCallback } from "react";
+import { memo, useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { ansiToHtml } from "../lib/ansi";
 import { roomStyle } from "../lib/constants";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -35,13 +35,37 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
   }, []);
 
   // Shared WebSocket with reconnection for capture stream
+  // Follow-tail: decide "stay pinned to the bottom" when a capture arrives, but
+  // scroll only AFTER React has committed the new HTML (useLayoutEffect below).
+  // The old requestAnimationFrame could fire before the commit — after a window
+  // switch it then scrolled the short "connecting..." placeholder, the real
+  // content landed at scrollTop 0, and every later capture read "not at bottom"
+  // so the view stayed stuck at the top of the old history (Volt box, 2026-10-22).
+  const followRef = useRef(true);
+  const [showJump, setShowJump] = useState(false);
   const handleCapture = useCallback((data: any) => {
     if (data.type === "capture") {
+      // A capture for the window we just left can still be in flight — drop it.
+      if (data.target && selectedTargetRef.current && data.target !== selectedTargetRef.current) return;
       const out = outputRef.current;
       const atBottom = out ? out.scrollHeight - out.scrollTop - out.clientHeight < 60 : true;
+      followRef.current = followRef.current || atBottom;
       setCaptureHtml(ansiToHtml(data.content || "(empty)"));
-      if (atBottom) requestAnimationFrame(() => out?.scrollTo(0, out.scrollHeight));
     }
+  }, []);
+
+  useLayoutEffect(() => {
+    const out = outputRef.current;
+    if (!out || !captureHtml) return;
+    if (followRef.current) out.scrollTop = out.scrollHeight;
+    followRef.current = false;
+    setShowJump(out.scrollHeight - out.scrollTop - out.clientHeight >= 60);
+  }, [captureHtml]);
+
+  const jumpToLatest = useCallback(() => {
+    const out = outputRef.current;
+    if (out) out.scrollTop = out.scrollHeight;
+    setShowJump(false);
   }, []);
 
   const handleConnect = useCallback((sendFn: (msg: object) => void) => {
@@ -67,6 +91,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
 
   const selectWindow = useCallback((target: string) => {
     setSelectedTarget(target);
+    followRef.current = true; // a freshly opened window always starts at the latest line
     setCaptureHtml("");
     setInputBuf("");
     setSendQueue([]);
@@ -322,6 +347,7 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
           ref={outputRef}
           className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[13px] leading-[1.35]"
           style={{ background: "#0a0a0f", whiteSpace: "pre", wordBreak: "normal", overflowX: "auto", color: "#aaa" }}
+          onScroll={(e) => { const o = e.currentTarget; setShowJump(o.scrollHeight - o.scrollTop - o.clientHeight >= 60); }}
         >
           {captureHtml ? (
             <div dangerouslySetInnerHTML={{ __html: captureHtml }} />
@@ -331,6 +357,18 @@ export const TerminalView = memo(function TerminalView({ sessions, agents, conne
             </div>
           )}
         </div>
+        {showJump && captureHtml && (
+          <div className="relative h-0">
+            <button
+              onClick={jumpToLatest}
+              data-testid="jump-latest"
+              className="absolute left-1/2 -translate-x-1/2 bottom-3 px-4 py-1.5 rounded-full text-[12.5px] font-semibold text-white shadow-lg cursor-pointer"
+              style={{ background: "#5b3df5" }}
+            >
+              ⬇ ล่าสุด
+            </button>
+          </div>
+        )}
 
         {/* Mobile control-key bar — same raw-key PTY path as the composer, for
             driving interactive claude TUIs the soft keyboard can't reach. Keys
