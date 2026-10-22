@@ -90,6 +90,8 @@ const NAV_ITEMS: NavItem[] = [
   // External KB link — opens the (already auth-gated) TconHR guide hub in a new tab.
   // Absolute same-origin path → existing dashboard login cookie is sent → no re-login on mobile.
   { href: "/maw/tconsiam/guides/tconhr.html", label: "📚 KB", id: "kb", external: true },
+  // Research index — Echo's research LPs (same auth-gated /maw/ origin as KB above).
+  { href: "/maw/lp/research-index/", label: "🔬 Research", id: "research", external: true },
 ];
 
 const isTouch = typeof window !== "undefined" && ("ontouchstart" in window || navigator.maxTouchPoints > 0);
