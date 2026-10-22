@@ -176,17 +176,36 @@ export function MailView() {
   // Clear the whole unread backlog in one tap (Boss-decided). Optimistic, then
   // reload to reconcile with server truth — a message the server can't stamp
   // (no editable frontmatter) honestly re-appears unread rather than faking 0.
+  // ⛔ 2026-09-07 (Boss-decided) — this is NOT "clear my inbox". The server walks
+  //    every allowlisted root, so one tap stamps every house's mail read. It fired
+  //    twice in the wild and nobody could say who pressed it. Two changes:
+  //      (a) ask first, and say out loud how many and that it spans all houses;
+  //      (b) send the confirm token the server now requires.
+  //    (a) alone would be an intention — any bare `curl` skips it. The server-side
+  //    token + audit log are the mechanism; this is the part that stops the ACCIDENT.
   const markAllRead = useCallback(async () => {
     if (unreadCount === 0) return;
+    const houses = new Set(items.filter((x) => !x.read).map((x) => x.oracleHome)).size;
+    const ok = window.confirm(
+      `Mark ${unreadCount} unread message${unreadCount === 1 ? "" : "s"} as read` +
+      `${houses > 1 ? ` across ${houses} Oracle inboxes` : ""}?\n\n` +
+      `This marks mail in EVERY house, not just yours, and cannot be undone from here.`,
+    );
+    if (!ok) return;
     setItems((xs) => xs.map((x) => ({ ...x, read: true }))); // optimistic
     try {
-      await apiFetch("/api/psi-mail/mark-read-all", { method: "POST", body: "{}" });
+      // apiFetch adds Content-Type itself when a body is present (apiFetch.ts:20) —
+      // setting it here too would put two differently-cased keys in one object.
+      await apiFetch("/api/psi-mail/mark-read-all", {
+        method: "POST",
+        body: JSON.stringify({ confirm: "mark-all-read" }),
+      });
     } catch {
       // swallow — the reconcile below restores real state on failure too
     } finally {
       load();
     }
-  }, [unreadCount, load]);
+  }, [unreadCount, items, load]);
 
   const filtered = useMemo(() => items.filter((m) => {
     if (oracleFilter && m.oracleHome !== oracleFilter) return false;

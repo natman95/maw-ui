@@ -106,7 +106,11 @@ export const XTerminal = forwardRef<XTerminalHandle, XTerminalProps>(function XT
       // Deeper history so there's something to scroll *into*. claude's Ink TUI
       // renders to the normal buffer (not alt-screen), so past output scrolls
       // up as real scrollback; the 1000-line default truncated long sessions.
-      scrollback: 5000,
+      // Boss 2026-08-15: 5000 → 20000. This is the lowest ceiling in the chain
+      // (tmux 50000 → maw replay 20000 → here), so it is what Boss actually
+      // gets to scroll. Kept below tmux on purpose: this buffer lives in the
+      // phone's RAM, not the box's.
+      scrollback: 20000,
     });
 
     const fit = new FitAddon();
