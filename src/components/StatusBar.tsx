@@ -87,9 +87,9 @@ const NAV_ITEMS: NavItem[] = [
   { href: "#progress", label: "Progress", id: "progress" },
   { href: "#consciousness", label: "🧠 Think", id: "consciousness" },
   { href: "#config", label: "Config", id: "config" },
-  // External KB link — opens the (already auth-gated) TconHR guide hub in a new tab.
+  // External KB link — opens the (already auth-gated) KB hub in a new tab (was the TconHR guide until 2026-10-22).
   // Absolute same-origin path → existing dashboard login cookie is sent → no re-login on mobile.
-  { href: "/maw/tconsiam/guides/tconhr.html", label: "📚 KB", id: "kb", external: true },
+  { href: "/maw/tconsiam/index.html", label: "📚 KB", id: "kb", external: true },
   // Research index — Echo's research LPs (same auth-gated /maw/ origin as KB above).
   { href: "/maw/lp/research-index/", label: "🔬 Research", id: "research", external: true },
 ];
