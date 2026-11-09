@@ -75,17 +75,19 @@ function HistoryStrip({ history, state }: { history: number[]; state: OpsSystem[
 export function OpsView() {
   const [status, setStatus] = useState<OpsStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  // null = ok · 404 = ยังไม่มีไฟล์ · ตัวเลขอื่น = HTTP ที่ล้ม · "net"/"parse" = ล้มก่อนได้ข้อมูล
+  const [error, setError] = useState<number | "net" | "parse" | null>(null);
 
   const load = useCallback(async () => {
     try {
       const res = await fetch(apiUrl("/ops/status.json"), { cache: "no-store" });
-      if (!res.ok) throw new Error(`${res.status}`);
-      const data = (await res.json()) as OpsStatus;
+      if (!res.ok) { setError(res.status); setStatus(null); setLoading(false); return; }
+      let data: OpsStatus;
+      try { data = (await res.json()) as OpsStatus; } catch { setError("parse"); setStatus(null); setLoading(false); return; }
       setStatus(data);
-      setError(false);
+      setError(null);
     } catch {
-      setError(true);
+      setError("net");
       setStatus(null);
     }
     setLoading(false);
@@ -118,7 +120,19 @@ export function OpsView() {
 
       {loading ? (
         <div className="text-slate-500 text-sm py-8 text-center">กำลังโหลด…</div>
-      ) : error || !status ? (
+      ) : error !== null && error !== 404 ? (
+        // ไฟล์อาจมีอยู่แต่โหลดไม่ได้ — ห้ามแสดงเป็น "ยังไม่มีข้อมูล" เพราะคนอ่านจะคิดว่าแค่รอ (403 เงียบมาหลายสัปดาห์ 2026-11-09)
+        <div className="text-red-300 text-sm py-8 text-center border border-red-500/40 bg-red-500/10 rounded-lg">
+          {error === 403
+            ? "อ่าน status.json ไม่ได้ (HTTP 403) — ไฟล์มีอยู่ แต่เว็บเซิร์ฟเวอร์ไม่มีสิทธิ์อ่าน"
+            : error === "net"
+              ? "โหลด status.json ไม่สำเร็จ (เชื่อมต่อไม่ได้)"
+              : error === "parse"
+                ? "status.json ไม่ใช่ JSON ที่อ่านได้ (session อาจหมดอายุ — ลอง login ใหม่)"
+                : `โหลด status.json ไม่สำเร็จ (HTTP ${error})`}
+          <div className="text-[11px] text-red-300/70 mt-1">ตอนนี้มองไม่เห็นสถานะระบบ — ไม่ได้แปลว่าทุกอย่างปกติ · แจ้ง Pulse (ops-status-collector)</div>
+        </div>
+      ) : error === 404 || !status ? (
         <div className="text-slate-500 text-sm py-8 text-center border border-white/10 rounded-lg">
           ยังไม่มีข้อมูล ops (status.json)<div className="text-[11px] text-slate-600 mt-1">รอ Pulse เขียน /maw/ops/status.json</div>
         </div>
